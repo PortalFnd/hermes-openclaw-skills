@@ -1,0 +1,101 @@
+#!/bin/bash
+# PayToll — Call any PayToll API endpoint. Payment handled automatically via x402.
+# Usage: paytoll <endpoint> [json_body]
+#
+# Endpoints (27 total):
+#   DeFi / Aave:
+#     aave-best-borrow          — Find lowest Aave V3 borrow APR across all chains
+#     aave-best-yield           — Find best Aave V3 supply APY across all chains
+#     aave-borrow               — Borrow from Aave V3
+#     aave-health-factor        — Check Aave V3 health factor
+#     aave-markets              — List Aave V3 markets
+#     aave-repay                — Repay Aave V3 debt
+#     aave-supply               — Supply to Aave V3
+#     aave-user-positions       — Get Aave V3 user positions
+#     aave-withdraw             — Withdraw from Aave V3
+#
+#   Crypto:
+#     crypto-price              — Real-time crypto prices
+#     ens-lookup                — ENS name resolution / reverse lookup
+#     token-balance             — Token balance for any wallet
+#     onchain-token-data        — On-chain token metadata
+#     onchain-token-price       — On-chain token price
+#     search-pools              — Search DEX liquidity pools
+#     trending-pools            — Trending DEX pools
+#     wallet-validator          — Validate wallet addresses
+#
+#   Swaps:
+#     swap-quote                — Get DEX swap quote
+#     swap-build                — Build DEX swap transaction
+#
+#   AI:
+#     llm-openai                — OpenAI chat completions (GPT-4o etc)
+#     llm-anthropic             — Anthropic chat completions (Claude)
+#     llm-google                — Google chat completions (Gemini)
+#
+#   Twitter / X:
+#     twitter-search            — Search recent tweets
+#     twitter-post              — Post a tweet
+#     twitter-tweet-lookup      — Look up specific tweets
+#     twitter-user-lookup       — Look up Twitter users
+#     twitter-user-tweets       — Get a user's recent tweets
+#
+# Examples:
+#   paytoll crypto-price '{"symbol":"ETH"}'
+#   paytoll ens-lookup '{"name":"vitalik.eth"}'
+#   paytoll swap-quote '{"tokenIn":"ETH","tokenOut":"USDC","amount":"0.1","chain":"base"}'
+#   paytoll twitter-search '{"query":"bitcoin","max_results":10}'
+#   paytoll llm-openai '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}]}'
+
+ENDPOINT="$1"
+BODY="${2:-{}}"
+
+if [ -z "$ENDPOINT" ]; then
+  echo '{"error":"Usage: paytoll <endpoint> [json_body]","hint":"Try: paytoll crypto-price {\"symbol\":\"ETH\"}"}'
+  exit 1
+fi
+
+PAYTOLL_BASE="https://api.paytoll.io/v1"
+
+# Map friendly names to API paths
+case "$ENDPOINT" in
+  aave-best-borrow)    PATH_SEG="aave/best-borrow" ;;
+  aave-best-yield)     PATH_SEG="aave/best-yield" ;;
+  aave-borrow)         PATH_SEG="aave/borrow" ;;
+  aave-health-factor)  PATH_SEG="aave/health-factor" ;;
+  aave-markets)        PATH_SEG="aave/markets" ;;
+  aave-repay)          PATH_SEG="aave/repay" ;;
+  aave-supply)         PATH_SEG="aave/supply" ;;
+  aave-user-positions) PATH_SEG="aave/user-positions" ;;
+  aave-withdraw)       PATH_SEG="aave/withdraw" ;;
+  crypto-price)        PATH_SEG="crypto/price" ;;
+  ens-lookup)          PATH_SEG="crypto/ens" ;;
+  token-balance)       PATH_SEG="crypto/token-balance" ;;
+  onchain-token-data)  PATH_SEG="crypto/onchain/token-data" ;;
+  onchain-token-price) PATH_SEG="crypto/onchain/token-price" ;;
+  search-pools)        PATH_SEG="crypto/onchain/search-pools" ;;
+  trending-pools)      PATH_SEG="crypto/onchain/trending-pools" ;;
+  wallet-validator)    PATH_SEG="crypto/validate" ;;
+  swap-quote)          PATH_SEG="swap/quote" ;;
+  swap-build)          PATH_SEG="swap/build" ;;
+  llm-openai)          PATH_SEG="ai/openai/chat" ;;
+  llm-anthropic)       PATH_SEG="ai/anthropic/chat" ;;
+  llm-google)          PATH_SEG="ai/google/chat" ;;
+  twitter-search)      PATH_SEG="twitter/search" ;;
+  twitter-post)        PATH_SEG="twitter/post" ;;
+  twitter-tweet-lookup) PATH_SEG="twitter/tweets" ;;
+  twitter-user-lookup) PATH_SEG="twitter/user" ;;
+  twitter-user-tweets) PATH_SEG="twitter/user-tweets" ;;
+  *)
+    echo "{\"error\":\"Unknown endpoint: $ENDPOINT\",\"available\":\"aave-best-borrow aave-best-yield aave-borrow aave-health-factor aave-markets aave-repay aave-supply aave-user-positions aave-withdraw crypto-price ens-lookup token-balance onchain-token-data onchain-token-price search-pools trending-pools wallet-validator swap-quote swap-build llm-openai llm-anthropic llm-google twitter-search twitter-post twitter-tweet-lookup twitter-user-lookup twitter-user-tweets\"}"
+    exit 1
+    ;;
+esac
+
+URL="${PAYTOLL_BASE}/${PATH_SEG}"
+
+# Use signed-fetch (which handles x402 payments automatically)
+curl -sf -X POST http://127.0.0.1:8128/fetch \
+  -H 'Content-Type: application/json' \
+  -d "{\"url\":\"$URL\",\"method\":\"POST\",\"body\":$BODY}" \
+  2>/dev/null || echo '{"error":"signing proxy not running — install clawtrl-wallet first"}'

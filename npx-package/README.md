@@ -1,6 +1,6 @@
 # clawtrl-wallet
 
-Crypto wallet for AI agents on Base (Ethereum L2). ERC-8128 signing, x402 autonomous payments, ETH/USDC transfers.
+Crypto wallet for AI agents on Base (Ethereum L2). ERC-8128 signing, x402 autonomous payments, ETH/USDC transfers. Works with OpenClaw and Hermes runtimes.
 
 ## Install
 
@@ -28,6 +28,8 @@ Works with or without root:
 - `AGENT_WALLET_PRIVATE_KEY` environment variable (Ethereum private key)
 
 ## Architecture
+
+OpenClaw and Hermes agents call the same shell tools backed by the same signing proxy.
 
 ```
 Agent → shell tool (curl) → signing proxy (:8128) → Base chain

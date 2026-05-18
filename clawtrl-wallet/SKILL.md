@@ -115,6 +115,18 @@ All 5 shell tools are thin `curl` wrappers that call this proxy.
 Agent → shell tool (curl) → signing proxy (:8128) → Base chain / x402 service
 ```
 
+## Companion Crypto Skills
+
+These ecosystem guides pair well with the Clawtrl wallet:
+
+- **ETHSkills** — Ethereum production reference for gas, wallets, L2s, standards, security, testing, frontend UX, indexing, and contract addresses. No API keys required. Start at `https://ethskills.com/SKILL.md` and fetch task-specific guides as needed.
+- **OpenZeppelin Skills** — Security-first contract development guidance. No API keys required. Hardhat projects need `@openzeppelin/contracts` (and optionally `@openzeppelin/contracts-upgradeable`); Foundry projects should pin release tags via `forge install`. Optional MCP helpers are available at `https://mcp.openzeppelin.com/`.
+- **Binance Skills Hub** — Guidance for Binance market data, trading, wallet tracking, and account operations. Public market data can work without auth, but trading and account workflows require a Binance API key and secret. Prefer testnet or demo keys first.
+- **Uniswap AI** — Guidance for Uniswap swaps, liquidity, Universal Router, Permit2, hooks, and viem-based EVM integrations. Trading API mode requires a Uniswap API key and `x-universal-router-version: 2.0`; SDK mode needs `viem` plus Uniswap packages; onchain swaps need funded wallet balances and token approvals.
+- **Fluid Protocol** — Guidance for Fluid lending and vault workflows on Base and Ethereum. No API key required. Use `viem` with a Base or Ethereum RPC endpoint; lending flows need wallet funds and approvals, while vault flows need collateral, gas, and active health monitoring.
+
+Use these guides for planning and implementation details. Use the wallet tools here when you need to sign, pay, approve, or move funds from the agent's Base wallet.
+
 ## Dependencies
 
 - **viem** — Ethereum wallet, signing, contract interaction

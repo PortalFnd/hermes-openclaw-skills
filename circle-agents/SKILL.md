@@ -1,7 +1,7 @@
 ---
 name: circle-agents
 description: Discover Circle Agents marketplace services and use Clawtrl's existing wallet/x402 tools to pay USDC-enabled APIs safely. Use when a task needs paid APIs, premium data, marketplace discovery, or USDC pay-per-call services.
-compatibility: Works with Clawtrl agents that already have wallet-balance and signed-fetch available. This skill does not replace the agent wallet or install Circle custody.
+compatibility: Works with Clawtrl OpenClaw and Hermes agents that already have wallet-balance and signed-fetch available. This skill does not replace the agent wallet or install Circle custody.
 metadata: { "openclaw": { "emoji": "⭕", "homepage": "https://agents.circle.com/services" } }
 ---
 # Circle Agents Marketplace

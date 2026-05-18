@@ -99,7 +99,7 @@ npm install --production 2>&1 | tail -3 || {
 
 # Install shell tools
 echo "[4/6] Installing shell tools..."
-TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign"
+TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll"
 for tool in $TOOLS; do
   if [ -n "$SKILL_DIR" ]; then
     cp "$SKILL_DIR/bin/$tool" "$TOOLS_DIR/$tool"
@@ -235,6 +235,7 @@ echo "    wallet-balance   — ETH/USDC balances"
 echo "    signed-fetch     — ERC-8128 + x402 requests"
 echo "    crypto-send      — send ETH/USDC on Base"
 echo "    erc8128-sign     — sign requests (headers only)"
+echo "    paytoll          — 27 paid APIs via x402 (DeFi, swaps, AI, Twitter)"
 echo "  ══════════════════════════════════════"
 echo "  Source: $REPO"
 echo ""

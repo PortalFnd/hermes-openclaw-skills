@@ -1,22 +1,23 @@
-# Clawtrl OpenClaw Skills
+# Clawtrl Skills
 
-Official skills for [OpenClaw](https://openclaw.ai) agents, built by [Clawtrl](https://clawtrl.com).
+Official skills for [OpenClaw](https://openclaw.ai) and [Hermes](https://nousresearch.com/hermes) agents, built by [Clawtrl](https://clawtrl.com).
 
 ## Skills
 
-| Skill | Description | Install |
-|-------|-------------|---------|
-| [clawtrl-wallet](./clawtrl-wallet/) | Crypto wallet on Base with ERC-8128 signing, x402 payments, and transfers | `clawhub install clawtrl-wallet` |
+| Skill | Description | Install | Runtimes |
+|-------|-------------|---------|----------|
+| [clawtrl-wallet](./clawtrl-wallet/) | Crypto wallet on Base with ERC-8128 signing, x402 payments, and transfers | `clawhub install clawtrl-wallet` | OpenClaw, Hermes |
+| [circle-agents](./circle-agents/) | Discover and pay for Circle Agents marketplace services with Clawtrl wallet tools | Guidance skill | OpenClaw, Hermes |
 
 ## Install
 
-Send the install command to your agent via Telegram, Discord, or any chat platform:
+**OpenClaw:** Send the install command to your agent via Telegram, Discord, or any chat platform:
 
 ```
 clawhub install clawtrl-wallet
 ```
 
-Or run it directly in your agent's terminal.
+**Hermes:** Skills with a `SKILL.md` are automatically available when placed in `/root/.hermes/skills/<skill-name>/SKILL.md`. The Clawtrl dashboard can install compatible skills directly on Hermes agents.
 
 ## What's Included
 
@@ -40,12 +41,16 @@ The **clawtrl-wallet** skill gives your agent:
 
 ## Pre-installed on Clawtrl
 
-If you deploy an agent via [clawtrl.com](https://clawtrl.com), the wallet skill is pre-installed and configured automatically. Just fund the wallet and go.
+If you deploy an agent via [clawtrl.com](https://clawtrl.com), the wallet skill is pre-installed and configured automatically on both OpenClaw and Hermes runtimes. Just fund the wallet and go.
+
+**Hermes agents** also come preloaded with the [circle-agents](./circle-agents/) marketplace discovery skill.
 
 ## Links
 
+- [Clawtrl](https://clawtrl.com)
 - [Clawtrl Skills Marketplace](https://clawtrl.com/skills)
 - [OpenClaw](https://openclaw.ai)
+- [Hermes Agent](https://nousresearch.com/hermes)
 - [Agent Skills Spec](https://skills.sh)
 - [x402 Protocol](https://docs.x402.org)
 - [ERC-8128](https://erc8128.org)
