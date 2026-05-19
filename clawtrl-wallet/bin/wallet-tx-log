@@ -1,0 +1,6 @@
+#!/bin/bash
+# wallet-tx-log — Show recent wallet transactions (transfers, contract writes, x402 payments)
+# Usage: wallet-tx-log [limit]
+# Default limit: 50. Max: 500.
+LIMIT="${1:-50}"
+curl -sf "http://127.0.0.1:8128/tx-log?limit=$LIMIT" 2>/dev/null || echo '{"error":"signing proxy not running"}'

@@ -1,6 +1,6 @@
 # clawtrl-wallet
 
-Crypto wallet for AI agents on Base (Ethereum L2). ERC-8128 signing, x402 autonomous payments, ETH/USDC transfers. Works with OpenClaw and Hermes runtimes.
+Crypto wallet for AI agents on Base (Ethereum L2). ERC-8128 signing, x402 autonomous payments, ETH/USDC transfers, generic contract read/write, ENS resolution, and a persistent transaction log. Works with OpenClaw and Hermes runtimes.
 
 ## Install
 
@@ -21,6 +21,14 @@ Works with or without root:
 | `signed-fetch` | ERC-8128 signed HTTP requests + x402 auto-payment |
 | `crypto-send` | Send ETH or USDC to any address on Base |
 | `erc8128-sign` | Sign an HTTP request and return headers |
+| `paytoll` | Call any PayToll x402 API endpoint |
+| `token-balance` | Check balance of any ERC-20 token on Base |
+| `tx-status` | Check if a transaction succeeded, reverted, or is pending |
+| `contract-read` | Call any view function on any Base smart contract |
+| `contract-write` | Send a transaction to any Base smart contract |
+| `ens-resolve` | Resolve ENS names to addresses (and reverse) |
+| `gas-estimate` | Preview gas cost before sending a transaction |
+| `wallet-tx-log` | Read the persistent transaction history |
 
 ## Requirements
 

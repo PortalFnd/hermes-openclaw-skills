@@ -1,0 +1,18 @@
+#!/bin/bash
+# ens-resolve — Resolve an ENS name to address, or an address to ENS name
+# Usage: ens-resolve <name_or_address>
+# Example: ens-resolve vitalik.eth
+# Example: ens-resolve 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+INPUT="$1"
+if [ -z "$INPUT" ]; then
+  echo '{"error":"Usage: ens-resolve <name_or_address>"}'
+  exit 1
+fi
+if [[ "$INPUT" == 0x* ]]; then
+  PAYLOAD="{\"address\":\"$INPUT\"}"
+else
+  PAYLOAD="{\"name\":\"$INPUT\"}"
+fi
+curl -sf -X POST http://127.0.0.1:8128/ens \
+  -H 'Content-Type: application/json' \
+  -d "$PAYLOAD" 2>/dev/null || echo '{"error":"signing proxy not running"}'

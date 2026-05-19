@@ -1,0 +1,14 @@
+#!/bin/bash
+# gas-estimate — Estimate the gas cost for a transaction on Base
+# Usage: gas-estimate [to_address] [eth_value] [hex_data]
+# With no args, shows the current Base gas price + cost for a basic ETH transfer.
+TO="$1"
+VALUE="${2:-0}"
+DATA="$3"
+PAYLOAD="{\"value\":\"$VALUE\""
+if [ -n "$TO" ]; then PAYLOAD="$PAYLOAD,\"address\":\"$TO\""; fi
+if [ -n "$DATA" ]; then PAYLOAD="$PAYLOAD,\"data\":\"$DATA\""; fi
+PAYLOAD="$PAYLOAD}"
+curl -sf -X POST http://127.0.0.1:8128/gas-estimate \
+  -H 'Content-Type: application/json' \
+  -d "$PAYLOAD" 2>/dev/null || echo '{"error":"signing proxy not running"}'

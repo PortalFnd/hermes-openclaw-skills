@@ -1,19 +1,24 @@
 ---
 name: clawtrl-wallet
-description: Crypto wallet on Base (Ethereum L2) with ERC-8128 signed HTTP requests, x402 autonomous payments, and agent-to-agent messaging. Gives your agent a native Ethereum wallet, authenticated identity, and the ability to pay for services automatically.
-compatibility: Requires Node.js 20+ and curl. Works on any OpenClaw instance.
+description: Crypto wallet on Base (Ethereum L2) with ERC-8128 signed HTTP requests, x402 autonomous payments, ERC-20 token reads, generic contract read/write, ENS resolution, and a persistent transaction log. Gives your agent a full on-chain identity and the ability to read and act across Base safely.
+compatibility: Works with Clawtrl OpenClaw and Hermes agents. Requires Node.js 20+ and curl on the host. The signing proxy runs on 127.0.0.1:8128 and is shared by both runtimes.
 metadata: { "openclaw": { "emoji": "💎", "homepage": "https://clawtrl.com/skills", "requires": { "bins": ["curl", "node"] } } }
 ---
 
 # Clawtrl Wallet
 
-Gives your OpenClaw agent a native Ethereum wallet on **Base** (Ethereum L2) with:
+Gives your OpenClaw or Hermes agent a native Ethereum wallet on **Base** (Ethereum L2) with:
 
 - **Wallet Management** — Check ETH/USDC balances, view address, verify chain identity
 - **ERC-8128 Authenticated Requests** — Sign outgoing HTTP requests with your wallet for cryptographic proof of identity
 - **x402 Autonomous Payments** — Auto-pay when APIs return HTTP 402 (supports v1 + v2)
-- **Crypto Transfers** — Send ETH and USDC to any address on Base
+- **Crypto Transfers** — Send ETH and USDC to any address on Base (with ENS support and balance precheck)
 - **Signed HTTP Client** — All-in-one tool: sign requests + handle payments automatically
+- **Generic ERC-20 Balances** — Read the balance of any token contract on Base
+- **Contract Read/Write** — Call any view function and send any transaction on any Base smart contract
+- **ENS Resolution** — Resolve `name.eth` to addresses (and reverse) using Ethereum mainnet
+- **Gas Estimation** — Preview the gas cost of a transaction before sending
+- **Transaction Log** — Every transfer, contract write, and x402 payment is appended to a JSONL log for full auditability and budgeting
 
 ## Tools
 
@@ -55,6 +60,68 @@ Sign a request and return the ERC-8128 headers (without sending).
 erc8128-sign <url> [method] [body]
 ```
 
+### token-balance
+Check the balance of any ERC-20 token on Base.
+```
+token-balance <token_contract_address>
+```
+**Example:**
+```
+token-balance 0x4200000000000000000000000000000000000006   # WETH on Base
+```
+
+### tx-status
+Check the status of a transaction on Base. Returns `success`, `reverted`, or `pending` with block number and gas used.
+```
+tx-status <tx_hash>
+```
+
+### contract-read
+Call any view or pure function on any smart contract on Base. Use this for Aave health factors, Uniswap pool reads, token allowances, NFT ownership, oracle prices, anything.
+```
+contract-read <address> <signature> [json_args_array]
+```
+**Example:**
+```
+contract-read 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 "balanceOf(address) view returns (uint256)" '["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"]'
+```
+
+### contract-write
+Send a state-changing transaction to any smart contract. Use this for token approvals, Aave deposits, Uniswap swaps, DAO votes, NFT mints, anything.
+```
+contract-write <address> <signature> [json_args_array] [eth_value]
+```
+**Example (approve USDC):**
+```
+contract-write 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 "approve(address,uint256)" '["0xSpender", "1000000"]'
+```
+**Safety:** Run `gas-estimate` first if you are unsure about cost. Run `wallet-balance` to confirm funds.
+
+### ens-resolve
+Resolve an ENS name to an address, or an address to an ENS name. Uses Ethereum mainnet.
+```
+ens-resolve <name_or_address>
+```
+**Examples:**
+```
+ens-resolve vitalik.eth
+ens-resolve 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+You can also pass `name.eth` directly to `crypto-send` — it resolves automatically before sending.
+
+### gas-estimate
+Estimate the gas cost of a transaction on Base. With no args, shows current gas price for a basic ETH transfer.
+```
+gas-estimate [to_address] [eth_value] [hex_data]
+```
+
+### wallet-tx-log
+Show recent wallet transactions (transfers, contract writes, x402 payments, bridges). Reads from the persistent JSONL log.
+```
+wallet-tx-log [limit]
+```
+Default limit: 50. Max: 500.
+
 ## File Structure
 
 ```
@@ -66,12 +133,49 @@ clawtrl-wallet/
 ├── src/
 │   └── signing-proxy.js            # Node.js signing proxy server (the actual implementation)
 └── bin/
-    ├── wallet-info                 # Shell tool: get wallet address
-    ├── wallet-balance              # Shell tool: check ETH/USDC balances
-    ├── signed-fetch                # Shell tool: ERC-8128 signed request + x402 payment
-    ├── crypto-send                 # Shell tool: send ETH/USDC on Base
-    └── erc8128-sign                # Shell tool: sign request (returns headers)
+    ├── wallet-info                 # Wallet address + chain
+    ├── wallet-balance              # ETH/USDC balances
+    ├── signed-fetch                # ERC-8128 signed request + x402 payment
+    ├── crypto-send                 # Send ETH/USDC on Base (with ENS + precheck)
+    ├── erc8128-sign                # Sign request (returns headers)
+    ├── paytoll                     # Call any PayToll x402 API endpoint
+    ├── token-balance               # Read any ERC-20 balance
+    ├── tx-status                   # Check Base transaction status
+    ├── contract-read               # Call any view function
+    ├── contract-write              # Send any transaction
+    ├── ens-resolve                 # ENS lookups
+    ├── gas-estimate                # Preview gas cost
+    └── wallet-tx-log               # Recent transactions from the log
 ```
+
+## Transaction Log
+
+Every successful transfer, contract write, and x402 payment is appended to a JSONL log file. Read it with `wallet-tx-log`. Default location resolves in this order:
+
+1. `/root/.hermes/skills/clawtrl-wallet/transactions.jsonl` (Hermes hosts)
+2. `/opt/clawtrl/wallet-tools/transactions.jsonl` (OpenClaw hosts)
+3. `~/.clawtrl/transactions.jsonl` (non-root installs)
+
+Each line is a JSON object with `timestamp`, `wallet`, `type`, and operation-specific fields. Use this to track spending, debug failed runs, and report budget usage to the user. The log is append-only and the agent should never edit it directly.
+
+## Budget and Safety Guardrails
+
+Unless the user gives a different budget, follow these defaults when acting autonomously:
+
+- Confirm `wallet-balance` before every transaction
+- For payments above 0.50 USDC, ask the user first
+- For any `contract-write` on an unknown contract, ask the user first
+- Never approve unlimited (`max uint256`) allowances unless the user explicitly requests it; prefer scoped approvals
+- Use `gas-estimate` before any large or unfamiliar transaction
+- Read the recent `wallet-tx-log` at the start of a task so you have context on what you have already spent
+
+## Dealing with Errors
+
+- **`signing proxy not running`** — The proxy on `127.0.0.1:8128` is down. On systemd hosts: `systemctl restart clawtrl-signing`. The proxy reads the key from `/opt/openclaw/.env`.
+- **`Insufficient ETH balance` / `No ETH for gas on Base`** — Fund the wallet with a small amount of ETH. USDC transfers still need ETH for gas.
+- **`ENS name did not resolve`** — The name has no address record on Ethereum mainnet. Double-check spelling or use the raw address.
+- **`Transaction not found on Base`** — The tx hash has not propagated yet, or it was on a different chain. Wait a few seconds and retry `tx-status`.
+- **Transaction reverted** — `tx-status` returns `reverted`. Use `contract-read` to inspect contract state and find the reason (insufficient allowance, slippage, paused, etc.).
 
 ## Install
 

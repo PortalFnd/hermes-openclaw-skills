@@ -1,0 +1,12 @@
+#!/bin/bash
+# token-balance — Check the agent's balance of any ERC-20 token on Base
+# Usage: token-balance <token_contract_address>
+# Example: token-balance 0x4200000000000000000000000000000000000006   (WETH on Base)
+TOKEN="$1"
+if [ -z "$TOKEN" ]; then
+  echo '{"error":"Usage: token-balance <token_contract_address>","hint":"Use wallet-balance for ETH and USDC. Use this for any other ERC-20 token."}'
+  exit 1
+fi
+curl -sf -X POST http://127.0.0.1:8128/token-balance \
+  -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$TOKEN\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

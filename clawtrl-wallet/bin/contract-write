@@ -1,0 +1,17 @@
+#!/bin/bash
+# contract-write — Send a transaction to any smart contract on Base
+# Usage: contract-write <address> <signature> [json_args_array] [eth_value]
+# Example: contract-write 0xUSDC "approve(address,uint256)" '["0xspender","1000000"]'
+# Example: contract-write 0xCONTRACT "deposit()" '[]' 0.01   (sends 0.01 ETH with the call)
+# SAFETY: run gas-estimate first if you are unsure about cost.
+ADDR="$1"
+SIG="$2"
+ARGS="${3:-[]}"
+VALUE="${4:-0}"
+if [ -z "$ADDR" ] || [ -z "$SIG" ]; then
+  echo '{"error":"Usage: contract-write <address> <signature> [json_args_array] [eth_value]","example":"contract-write 0xUSDC \"approve(address,uint256)\" \"[\\\"0xspender\\\",\\\"1000000\\\"]\""}'
+  exit 1
+fi
+curl -sf -X POST http://127.0.0.1:8128/contract-write \
+  -H 'Content-Type: application/json' \
+  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"args\":$ARGS,\"value\":\"$VALUE\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

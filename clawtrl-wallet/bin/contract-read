@@ -1,0 +1,15 @@
+#!/bin/bash
+# contract-read — Call any view/pure function on any smart contract on Base
+# Usage: contract-read <address> <signature> [json_args_array]
+# Example: contract-read 0x... "balanceOf(address) view returns (uint256)" '["0xabc..."]'
+# Example: contract-read 0x... "totalSupply() view returns (uint256)"
+ADDR="$1"
+SIG="$2"
+ARGS="${3:-[]}"
+if [ -z "$ADDR" ] || [ -z "$SIG" ]; then
+  echo '{"error":"Usage: contract-read <address> <signature> [json_args_array]","example":"contract-read 0xUSDC \"balanceOf(address) view returns (uint256)\" \"[\\\"0xabc...\\\"]\""}'
+  exit 1
+fi
+curl -sf -X POST http://127.0.0.1:8128/contract-read \
+  -H 'Content-Type: application/json' \
+  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"args\":$ARGS}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
