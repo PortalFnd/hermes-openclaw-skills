@@ -19,6 +19,12 @@ Gives your OpenClaw or Hermes agent a native Ethereum wallet on **Base** (Ethere
 - **ENS Resolution** — Resolve `name.eth` to addresses (and reverse) using Ethereum mainnet
 - **Gas Estimation** — Preview the gas cost of a transaction before sending
 - **Transaction Log** — Every transfer, contract write, and x402 payment is appended to a JSONL log for full auditability and budgeting
+- **Token Allowance & Revoke** — Check and revoke ERC-20 approvals for security hygiene
+- **Wallet Summary & Stats** — One-command overview of balances, spending, approvals, and analytics
+- **Contract Events** — Query past event logs from any smart contract on Base
+- **Token Prices** — Live USD prices via Chainlink oracles (ETH, USDC, DAI, etc.)
+- **Address Book** — Label addresses for human-readable references
+- **Spending Caps** — Optional WALLET_DAILY_CAP_USDC env var enforces a hard daily spending limit
 
 ## Tools
 
@@ -122,6 +128,51 @@ wallet-tx-log [limit]
 ```
 Default limit: 50. Max: 500.
 
+### token-allowance
+Check how much of an ERC-20 token a spender can use from your wallet.
+```
+token-allowance <token_address> <spender_address>
+```
+
+### token-revoke
+Revoke an ERC-20 approval by setting the allowance to 0. Critical for security hygiene.
+```
+token-revoke <token_address> <spender_address>
+```
+
+### wallet-summary
+Full wallet overview in one command: ETH/USDC balances, today's spending vs daily cap, active token approvals, and the 5 most recent transactions.
+```
+wallet-summary
+```
+
+### wallet-stats
+Spending analytics from the transaction log: total transfers, contract writes, x402 payments, USDC/ETH spent, daily breakdown, and top contracts called.
+```
+wallet-stats
+```
+
+### contract-events
+Query past event logs from any smart contract on Base.
+```
+contract-events <address> <event_signature> [from_block] [to_block]
+```
+
+### token-price
+Get the current USD price of a token via Chainlink price feeds on Base. Supports eth, usdc, usdt, weth, dai, or a custom feed address.
+```
+token-price [token]
+```
+
+### wallet-label
+Label addresses for human-readable references. Labels are stored in a local JSON file.
+```
+wallet-label set <label> <address>
+wallet-label remove <label>
+wallet-label resolve <label>
+wallet-label
+```
+
 ## File Structure
 
 ```
@@ -146,6 +197,13 @@ clawtrl-wallet/
     ├── ens-resolve                 # ENS lookups
     ├── gas-estimate                # Preview gas cost
     └── wallet-tx-log               # Recent transactions from the log
+    ├── token-allowance             # Check ERC-20 approval amounts
+    ├── token-revoke                # Revoke ERC-20 approvals
+    ├── wallet-summary              # Full overview: balances, spending, approvals
+    ├── wallet-stats                # Spending analytics from tx history
+    ├── contract-events             # Query past events from any contract
+    ├── token-price                 # USD price via Chainlink oracles
+    └── wallet-label                # Address book for human-readable labels
 ```
 
 ## Transaction Log
@@ -201,6 +259,12 @@ Set your wallet private key in `/opt/openclaw/.env`:
 AGENT_WALLET_PRIVATE_KEY=0x...
 ```
 On Clawtrl-hosted agents, this is done automatically during deployment.
+
+Optional: set a hard daily spending cap in USDC:
+```
+WALLET_DAILY_CAP_USDC=50
+```
+When set, the proxy will reject any USDC transfer or contract write that would push today's total spending over the cap. Check current spending with `wallet-summary` or `wallet-stats`.
 
 Then fund the wallet with ETH (for gas) and USDC (for payments) on Base.
 

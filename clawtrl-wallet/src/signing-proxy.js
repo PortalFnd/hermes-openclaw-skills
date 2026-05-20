@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
@@ -134,6 +134,58 @@ function logTx(entry) {
   }
 }
 
+// Address book — label addresses for human-readable references
+var ADDRESS_BOOK_PATH = (function() {
+  var candidates = [
+    '/root/.hermes/skills/clawtrl-wallet/address-book.json',
+    '/opt/clawtrl/wallet-tools/address-book.json',
+    HOME + '/.clawtrl/address-book.json',
+  ];
+  for (var i = 0; i < candidates.length; i++) {
+    try { if (existsSync(dirname(candidates[i]))) return candidates[i]; } catch (_e) {}
+  }
+  return HOME + '/.clawtrl-address-book.json';
+})();
+function loadAddressBook() {
+  try { if (existsSync(ADDRESS_BOOK_PATH)) return JSON.parse(readFileSync(ADDRESS_BOOK_PATH, 'utf-8')); } catch (_e) {}
+  return {};
+}
+function saveAddressBook(book) {
+  try { writeFileSync(ADDRESS_BOOK_PATH, JSON.stringify(book, null, 2)); } catch (_e) {}
+}
+
+// Spending cap — enforce WALLET_DAILY_CAP_USDC if set
+var DAILY_CAP_USDC = parseFloat(env.WALLET_DAILY_CAP_USDC || process.env.WALLET_DAILY_CAP_USDC || '0');
+function getTodaySpentUsdc() {
+  try {
+    if (!existsSync(TX_LOG_PATH)) return 0;
+    var raw = readFileSync(TX_LOG_PATH, 'utf-8').trim();
+    if (!raw) return 0;
+    var lines = raw.split('\n');
+    var today = new Date().toISOString().slice(0, 10);
+    var total = 0;
+    for (var i = lines.length - 1; i >= 0; i--) {
+      try {
+        var entry = JSON.parse(lines[i]);
+        if (!entry.timestamp || entry.timestamp.slice(0, 10) !== today) continue;
+        if (entry.usdcValue) { total += Number(entry.usdcValue); continue; }
+        // Estimate USDC value from known fields
+        if (entry.token === 'usdc' && entry.amount) { total += Number(entry.amount); continue; }
+        if (entry.type === 'x402-payment' && entry.usdcAmount) { total += Number(entry.usdcAmount); }
+      } catch (_e) {}
+    }
+    return total;
+  } catch (_e) { return 0; }
+}
+function checkSpendingCap(usdcAmount) {
+  if (!DAILY_CAP_USDC || DAILY_CAP_USDC <= 0) return null;
+  var spent = getTodaySpentUsdc();
+  if (spent + Number(usdcAmount) > DAILY_CAP_USDC) {
+    return { error: 'Daily spending cap exceeded', cap: DAILY_CAP_USDC, spent: spent.toFixed(2), requested: String(usdcAmount), remaining: (DAILY_CAP_USDC - spent).toFixed(2) };
+  }
+  return null;
+}
+
 // Read raw balance helpers (used by precheck + balance endpoints)
 async function getEthBalanceWei() {
   return await publicClient.getBalance({ address: account.address });
@@ -242,6 +294,11 @@ async function handler(req, res) {
 
       var token = (body.token || 'eth').toLowerCase();
       var txHash;
+      // Spending cap check
+      if (token === 'usdc') {
+        var capErr = checkSpendingCap(body.amount);
+        if (capErr) return jsonRes(res, 403, capErr);
+      }
       // Balance precheck (reject early if insufficient)
       var ethBal = await getEthBalanceWei();
       if (token === 'usdc') {
@@ -262,7 +319,7 @@ async function handler(req, res) {
         }
         txHash = await walletClient.sendTransaction({ to: toAddr, value: weiAmount });
       }
-      logTx({ type: 'transfer', token: token, amount: body.amount, to: toAddr, originalTo: body.to, hash: txHash, status: 'submitted' });
+      logTx({ type: 'transfer', token: token, amount: body.amount, to: toAddr, originalTo: body.to, hash: txHash, status: 'submitted', usdcValue: token === 'usdc' ? body.amount : undefined });
       try {
         await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 30000 });
         logTx({ type: 'transfer', token: token, amount: body.amount, to: toAddr, hash: txHash, status: 'confirmed' });
@@ -447,6 +504,192 @@ async function handler(req, res) {
       console.error('/fetch error:', e.message);
       return jsonRes(res, 500, { error: e.message });
     }
+  }
+
+  if (req.url === '/token-allowance' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      if (!body.token || !isAddress(body.token)) return jsonRes(res, 400, { error: 'token (ERC-20 contract address) required' });
+      if (!body.spender || !isAddress(body.spender)) return jsonRes(res, 400, { error: 'spender address required' });
+      var allowanceAbi = [{ name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }];
+      var raw = await publicClient.readContract({ address: body.token, abi: allowanceAbi, functionName: 'allowance', args: [account.address, body.spender] });
+      var decimals = 18; var symbol = '';
+      try { decimals = Number(await publicClient.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
+      try { symbol = String(await publicClient.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
+      return jsonRes(res, 200, { token: body.token, symbol: symbol, spender: body.spender, allowance: formatUnits(raw, decimals), raw: raw.toString(), owner: account.address });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  if (req.url === '/token-revoke' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      if (!body.token || !isAddress(body.token)) return jsonRes(res, 400, { error: 'token (ERC-20 contract address) required' });
+      if (!body.spender || !isAddress(body.spender)) return jsonRes(res, 400, { error: 'spender address required' });
+      var revokeAbi = [{ name: 'approve', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] }];
+      var data = encodeFunctionData({ abi: revokeAbi, functionName: 'approve', args: [body.spender, 0n] });
+      var txHash = await walletClient.sendTransaction({ to: body.token, data: data });
+      logTx({ type: 'token-revoke', token: body.token, spender: body.spender, hash: txHash, status: 'submitted' });
+      return jsonRes(res, 200, { success: true, hash: txHash, token: body.token, spender: body.spender });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  if (req.url === '/wallet-summary') {
+    try {
+      var ethBal = await getEthBalanceWei();
+      var usdcBal = await getUsdcBalanceRaw();
+      var todaySpent = getTodaySpentUsdc();
+      // Recent 5 transactions
+      var recent = [];
+      try {
+        if (existsSync(TX_LOG_PATH)) {
+          var raw = readFileSync(TX_LOG_PATH, 'utf-8').trim();
+          var lines = raw ? raw.split('\n') : [];
+          recent = lines.slice(-5).map(function(l) { try { return JSON.parse(l); } catch (_e) { return { raw: l }; } });
+        }
+      } catch (_e) {}
+      // Active approvals (check USDC + any known tokens)
+      var approvals = [];
+      try {
+        var allowanceAbi = [{ name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }];
+        // Check USDC approvals from recent contract-write txs
+        var seenSpenders = {};
+        if (existsSync(TX_LOG_PATH)) {
+          var raw2 = readFileSync(TX_LOG_PATH, 'utf-8').trim();
+          var lines2 = raw2 ? raw2.split('\n') : [];
+          for (var i = lines2.length - 1; i >= 0 && Object.keys(seenSpenders).length < 10; i--) {
+            try {
+              var e = JSON.parse(lines2[i]);
+              if (e.type === 'contract-write' && e.function === 'approve' && e.address && e.args && e.args[0]) {
+                var spender = e.args[0];
+                if (!seenSpenders[spender]) {
+                  seenSpenders[spender] = true;
+                  try {
+                    var allowance = await publicClient.readContract({ address: e.address, abi: allowanceAbi, functionName: 'allowance', args: [account.address, spender] });
+                    if (allowance > 0n) approvals.push({ token: e.address, spender: spender, allowance: allowance.toString() });
+                  } catch (_e2) {}
+                }
+              }
+            } catch (_e3) {}
+          }
+        }
+      } catch (_e) {}
+      return jsonRes(res, 200, {
+        address: account.address, chain: 'base', chainId: 8453,
+        balances: { eth: formatUnits(ethBal, 18), usdc: formatUnits(usdcBal, 6) },
+        spending: { todaySpentUsdc: todaySpent.toFixed(2), dailyCap: DAILY_CAP_USDC || null },
+        approvals: approvals,
+        recentTransactions: recent,
+      });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  if (req.url === '/wallet-stats') {
+    try {
+      var stats = { totalTransfers: 0, totalContractWrites: 0, totalX402Payments: 0, totalUsdcSpent: 0, totalEthSpent: 0, byDay: {}, topContracts: {} };
+      if (existsSync(TX_LOG_PATH)) {
+        var raw = readFileSync(TX_LOG_PATH, 'utf-8').trim();
+        var lines = raw ? raw.split('\n') : [];
+        for (var i = 0; i < lines.length; i++) {
+          try {
+            var e = JSON.parse(lines[i]);
+            var day = e.timestamp ? e.timestamp.slice(0, 10) : 'unknown';
+            if (!stats.byDay[day]) stats.byDay[day] = { transfers: 0, contractWrites: 0, x402Payments: 0, usdcSpent: 0 };
+            if (e.type === 'transfer') {
+              stats.totalTransfers++;
+              stats.byDay[day].transfers++;
+              if (e.token === 'usdc' && e.amount) { var v = Number(e.amount); stats.totalUsdcSpent += v; stats.byDay[day].usdcSpent += v; }
+              if (e.token === 'eth' && e.amount) stats.totalEthSpent += Number(e.amount);
+            } else if (e.type === 'contract-write') {
+              stats.totalContractWrites++;
+              stats.byDay[day].contractWrites++;
+              if (e.address) { stats.topContracts[e.address] = (stats.topContracts[e.address] || 0) + 1; }
+            } else if (e.type === 'x402-payment') {
+              stats.totalX402Payments++;
+              stats.byDay[day].x402Payments++;
+            }
+          } catch (_e) {}
+        }
+      }
+      return jsonRes(res, 200, {
+        totals: { transfers: stats.totalTransfers, contractWrites: stats.totalContractWrites, x402Payments: stats.totalX402Payments, usdcSpent: stats.totalUsdcSpent.toFixed(2), ethSpent: stats.totalEthSpent.toFixed(8) },
+        byDay: stats.byDay,
+        topContracts: stats.topContracts,
+        logPath: TX_LOG_PATH,
+      });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  if (req.url === '/contract-events' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      if (!body.address || !isAddress(body.address)) return jsonRes(res, 400, { error: 'address required' });
+      if (!body.event) return jsonRes(res, 400, { error: 'event signature required (e.g. "event Transfer(address indexed from, address indexed to, uint256 value)")' });
+      var evtSig = body.event.trim();
+      if (evtSig.indexOf('event ') !== 0) evtSig = 'event ' + evtSig;
+      var fromBlock = body.fromBlock ? BigInt(body.fromBlock) : 0n;
+      var toBlock = body.toBlock ? BigInt(body.toBlock) : await publicClient.getBlockNumber();
+      var evtAbi = [parseAbiItem(evtSig)];
+      var logs = await publicClient.getLogs({
+        address: body.address,
+        event: evtAbi[0],
+        fromBlock: fromBlock,
+        toBlock: toBlock,
+        args: body.filter || {},
+      });
+      var serialized = logs.map(function(l) {
+        return {
+          address: l.address,
+          blockNumber: l.blockNumber.toString(),
+          transactionHash: l.transactionHash,
+          args: JSON.parse(JSON.stringify(l.args, function(_k, v) { return typeof v === 'bigint' ? v.toString() : v; })),
+        };
+      });
+      return jsonRes(res, 200, { address: body.address, event: evtSig, count: serialized.length, logs: serialized.slice(0, 100) });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  if (req.url === '/token-price' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      // Known Chainlink price feeds on Base
+      var FEEDS = {
+        'eth': '0x71041dddad3595F9CEd3DcCBe3D6178aAe8f09C2',
+        'usdc': '0x7e860098F58bBFC8648a4311b374B1D669a2bc6B',
+        'usdt': '0xf19d560eB8d2ADf07BD6D13ed03e1D11215721F9',
+        'weth': '0x71041dddad3595F9CEd3DcCBe3D6178aAe8f09C2',
+        'dai': '0x591e79239a7d679378eC8c847e5038150364C78F',
+      };
+      var feedAddr = body.feed || FEEDS[(body.token || 'eth').toLowerCase()];
+      if (!feedAddr) return jsonRes(res, 400, { error: 'Unknown token. Provide a Chainlink feed address or use: eth, usdc, usdt, weth, dai' });
+      var feedAbi = [parseAbiItem('function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)')];
+      var data = await publicClient.readContract({ address: feedAddr, abi: feedAbi, functionName: 'latestRoundData' });
+      var price = Number(data.answer) / 1e8;
+      return jsonRes(res, 200, { token: body.token || 'eth', price: price, decimals: 8, feed: feedAddr, updatedAt: data.updatedAt.toString() });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  if (req.url === '/address-book' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      var book = loadAddressBook();
+      if (body.action === 'set' && body.label && body.address) {
+        if (!isAddress(body.address)) return jsonRes(res, 400, { error: 'Invalid address' });
+        book[body.label.toLowerCase()] = body.address;
+        saveAddressBook(book);
+        return jsonRes(res, 200, { action: 'set', label: body.label, address: body.address });
+      }
+      if (body.action === 'remove' && body.label) {
+        delete book[body.label.toLowerCase()];
+        saveAddressBook(book);
+        return jsonRes(res, 200, { action: 'remove', label: body.label });
+      }
+      if (body.action === 'resolve' && body.label) {
+        var addr = book[body.label.toLowerCase()];
+        return jsonRes(res, 200, { label: body.label, address: addr || null, found: !!addr });
+      }
+      // Default: list all
+      return jsonRes(res, 200, { labels: book, count: Object.keys(book).length });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
   jsonRes(res, 404, { error: 'not found' });

@@ -1,0 +1,12 @@
+#!/bin/bash
+# token-allowance — Check how much of an ERC-20 token a spender can use
+# Usage: token-allowance <token_address> <spender_address>
+TOKEN="$1"
+SPENDER="$2"
+if [ -z "$TOKEN" ] || [ -z "$SPENDER" ]; then
+  echo '{"error":"Usage: token-allowance <token_address> <spender_address>"}'
+  exit 1
+fi
+curl -sf -X POST http://127.0.0.1:8128/token-allowance \
+  -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$TOKEN\",\"spender\":\"$SPENDER\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

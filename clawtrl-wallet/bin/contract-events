@@ -1,0 +1,18 @@
+#!/bin/bash
+# contract-events — Query past events from any smart contract on Base
+# Usage: contract-events <address> <event_signature> [from_block] [to_block]
+# Example: contract-events 0xUSDC "event Transfer(address indexed from, address indexed to, uint256 value)"
+ADDR="$1"
+EVENT="$2"
+FROM="${3:-0}"
+TO="$4"
+if [ -z "$ADDR" ] || [ -z "$EVENT" ]; then
+  echo '{"error":"Usage: contract-events <address> <event_signature> [from_block] [to_block]"}'
+  exit 1
+fi
+PAYLOAD="{\"address\":\"$ADDR\",\"event\":\"$EVENT\",\"fromBlock\":\"$FROM\""
+if [ -n "$TO" ]; then PAYLOAD="$PAYLOAD,\"toBlock\":\"$TO\""; fi
+PAYLOAD="$PAYLOAD}"
+curl -sf -X POST http://127.0.0.1:8128/contract-events \
+  -H 'Content-Type: application/json' \
+  -d "$PAYLOAD" 2>/dev/null || echo '{"error":"signing proxy not running"}'

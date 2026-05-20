@@ -1,0 +1,27 @@
+#!/bin/bash
+# wallet-label — Label addresses for human-readable references
+# Usage:
+#   wallet-label set <label> <address>    — save a label
+#   wallet-label remove <label>           — delete a label
+#   wallet-label resolve <label>          — look up an address by label
+#   wallet-label                          — list all labels
+ACTION="$1"
+LABEL="$2"
+ADDR="$3"
+if [ "$ACTION" = "set" ] && [ -n "$LABEL" ] && [ -n "$ADDR" ]; then
+  curl -sf -X POST http://127.0.0.1:8128/address-book \
+    -H 'Content-Type: application/json' \
+    -d "{\"action\":\"set\",\"label\":\"$LABEL\",\"address\":\"$ADDR\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+elif [ "$ACTION" = "remove" ] && [ -n "$LABEL" ]; then
+  curl -sf -X POST http://127.0.0.1:8128/address-book \
+    -H 'Content-Type: application/json' \
+    -d "{\"action\":\"remove\",\"label\":\"$LABEL\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+elif [ "$ACTION" = "resolve" ] && [ -n "$LABEL" ]; then
+  curl -sf -X POST http://127.0.0.1:8128/address-book \
+    -H 'Content-Type: application/json' \
+    -d "{\"action\":\"resolve\",\"label\":\"$LABEL\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+else
+  curl -sf -X POST http://127.0.0.1:8128/address-book \
+    -H 'Content-Type: application/json' \
+    -d '{}' 2>/dev/null || echo '{"error":"signing proxy not running"}'
+fi

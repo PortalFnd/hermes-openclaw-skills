@@ -1,0 +1,12 @@
+#!/bin/bash
+# token-revoke — Revoke an ERC-20 token approval (sets allowance to 0)
+# Usage: token-revoke <token_address> <spender_address>
+TOKEN="$1"
+SPENDER="$2"
+if [ -z "$TOKEN" ] || [ -z "$SPENDER" ]; then
+  echo '{"error":"Usage: token-revoke <token_address> <spender_address>"}'
+  exit 1
+fi
+curl -sf -X POST http://127.0.0.1:8128/token-revoke \
+  -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$TOKEN\",\"spender\":\"$SPENDER\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

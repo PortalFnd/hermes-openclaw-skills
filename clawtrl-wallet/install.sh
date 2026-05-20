@@ -99,7 +99,7 @@ npm install --production 2>&1 | tail -3 || {
 
 # Install shell tools
 echo "[4/6] Installing shell tools..."
-TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll token-balance tx-status contract-read contract-write ens-resolve gas-estimate wallet-tx-log"
+TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll token-balance tx-status contract-read contract-write ens-resolve gas-estimate wallet-tx-log token-allowance token-revoke wallet-summary wallet-stats contract-events token-price wallet-label"
 for tool in $TOOLS; do
   if [ -n "$SKILL_DIR" ]; then
     cp "$SKILL_DIR/bin/$tool" "$TOOLS_DIR/$tool"
@@ -243,6 +243,13 @@ echo "    contract-write   — call any state-changing function (DeFi, NFTs, DAO
 echo "    ens-resolve      — ENS name <-> address resolution"
 echo "    gas-estimate     — estimate cost of a transaction"
 echo "    wallet-tx-log    — recent transactions (transfers, payments, contract calls)"
+echo "    token-allowance  — check ERC-20 approval amounts"
+echo "    token-revoke     — revoke ERC-20 approvals (security)"
+echo "    wallet-summary   — full overview: balances, spending, approvals"
+echo "    wallet-stats     — spending analytics from transaction history"
+echo "    contract-events  — query past events from any contract"
+echo "    token-price      — USD price via Chainlink (ETH, USDC, DAI, etc.)"
+echo "    wallet-label     — label addresses for human-readable references"
 echo "  ══════════════════════════════════════"
 echo "  Source: $REPO"
 echo ""
