@@ -1,6 +1,6 @@
 {
   "name": "clawtrl-wallet",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Crypto wallet on Base with ERC-8128 signing, x402 autonomous payments, private (ZK) x402 payments, and transfers. Compatible with OpenClaw and Hermes agents.",
   "type": "module",
   "dependencies": {
@@ -14,6 +14,11 @@
   },
   "devDependencies": {
     "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "ws": "^8.21.0",
+    "underscore": "^1.13.8",
+    "elliptic": "^6.6.1"
   },
   "scripts": {
     "start": "node src/signing-proxy.js",
