@@ -1,6 +1,6 @@
 ---
 name: clawtrl-wallet
-description: Crypto wallet on Base (Ethereum L2) with ERC-8128 signed HTTP requests, x402 autonomous payments, ERC-20 token reads, generic contract read/write, ENS resolution, and a persistent transaction log. Gives your agent a full on-chain identity and the ability to read and act across Base safely.
+description: Crypto wallet on Base (Ethereum L2) with ERC-8128 signed HTTP requests, x402 autonomous payments, optional private (zero-knowledge) x402 payments, ERC-20 token reads, generic contract read/write, ENS resolution, and a persistent transaction log. Gives your agent a full on-chain identity and the ability to read and act across Base safely.
 compatibility: Works with Clawtrl OpenClaw and Hermes agents. Requires Node.js 20+ and curl on the host. The signing proxy runs on 127.0.0.1:8128 and is shared by both runtimes.
 metadata: { "openclaw": { "emoji": "💎", "homepage": "https://clawtrl.com/skills", "requires": { "bins": ["curl", "node"] } } }
 ---
@@ -25,6 +25,7 @@ Gives your OpenClaw or Hermes agent a native Ethereum wallet on **Base** (Ethere
 - **Token Prices** — Live USD prices via Chainlink oracles (ETH, USDC, DAI, etc.)
 - **Address Book** — Label addresses for human-readable references
 - **Spending Caps** — Optional WALLET_DAILY_CAP_USDC env var enforces a hard daily spending limit
+- **Private Payments (opt-in)** — Shield USDC into a zero-knowledge note and pay merchants / x402 APIs from a fresh burner wallet so payments are unlinkable to your public wallet. Disabled by default; enable with `CLAWTRL_PRIVACY_ENABLED=true`
 
 ## Tools
 
@@ -173,6 +174,62 @@ wallet-label resolve <label>
 wallet-label
 ```
 
+## Private Payments (opt-in)
+
+The wallet bundles a **vendored, in-tree zero-knowledge payment engine** (a fork of
+the px402 / `@prxvt/sdk` engine, MIT — see `src/privacy/NOTICE.md`). It lets your
+agent pay merchants and x402 APIs **without linking the payment to your public
+wallet address**: USDC is deposited into a privacy pool as an encrypted *note*,
+and payments are made from single-use burner wallets backed by a Groth16 ZK proof.
+
+**This is off by default.** To enable, set `CLAWTRL_PRIVACY_ENABLED=true` in the
+environment and restart the proxy. Notes are stored encrypted (AES-256-GCM) with a
+key derived from the wallet key — never in plaintext, never transmitted.
+
+> **Important caveat:** Only the *code* is vendored into Clawtrl. Private payments
+> still settle against the px402 protocol's deployed infrastructure (on-chain
+> pool/paymaster contracts, the `circuits.prxvt.com` ZK artifacts, the
+> `sdk-api.prxvt.com` bundler, the subgraph, and `attestor.prxvt.com`). Those are
+> not forkable without redeploying the entire protocol + trusted setup. Deposits
+> enter the px402 shared pool. All of these endpoints/addresses are overridable
+> via `CLAWTRL_PRIVACY_*` env vars if Clawtrl deploys its own infrastructure later.
+
+### private-status
+Show whether private payments are enabled plus your shielded balance.
+```
+private-status
+```
+
+### private-balance
+Show your private (shielded) USDC balance held in encrypted notes.
+```
+private-balance
+```
+
+### private-deposit
+Shield USDC: move it from the public wallet into the privacy pool, creating an
+encrypted note. Allowed amounts: `0.01`, `0.1`, `1`, `10`, `100`.
+```
+private-deposit <amount>
+```
+**Example:**
+```
+private-deposit 1
+```
+
+### private-pay
+Make an unlinkable USDC payment from your shielded balance (burner wallet + ZK proof).
+```
+private-pay <to_address> <amount>
+```
+
+### private-fetch
+Make an HTTP request that auto-pays any x402 (402 Payment Required) charge
+**privately** from your shielded balance.
+```
+private-fetch <url> [method] [body]
+```
+
 ## File Structure
 
 ```
@@ -203,7 +260,15 @@ clawtrl-wallet/
     ├── wallet-stats                # Spending analytics from tx history
     ├── contract-events             # Query past events from any contract
     ├── token-price                 # USD price via Chainlink oracles
-    └── wallet-label                # Address book for human-readable labels
+    ├── wallet-label                # Address book for human-readable labels
+    ├── private-status              # Privacy on/off + shielded balance
+    ├── private-balance             # Shielded (private) USDC balance
+    ├── private-deposit             # Shield USDC into the privacy pool
+    ├── private-pay                 # Unlinkable USDC payment (burner + ZK)
+    └── private-fetch               # x402 request paid privately
+├── src/
+│   ├── privacy/                    # Vendored ZK payment engine (TypeScript source, MIT)
+│   └── privacy-dist/               # Prebuilt CommonJS build of the engine
 ```
 
 ## Transaction Log
@@ -239,12 +304,12 @@ Unless the user gives a different budget, follow these defaults when acting auto
 
 ### Option 1: One-liner (recommended)
 ```bash
-curl -sSL https://raw.githubusercontent.com/PortalFnd/openclaw-skills/main/clawtrl-wallet/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/PortalFnd/hermes-openclaw-skills/main/clawtrl-wallet/install.sh | sudo bash
 ```
 
 ### Option 2: Clone and install
 ```bash
-git clone https://github.com/PortalFnd/openclaw-skills.git
+git clone https://github.com/PortalFnd/hermes-openclaw-skills.git
 cd openclaw-skills/clawtrl-wallet
 sudo ./install.sh
 ```
@@ -264,7 +329,15 @@ Optional: set a hard daily spending cap in USDC:
 ```
 WALLET_DAILY_CAP_USDC=50
 ```
-When set, the proxy will reject any USDC transfer or contract write that would push today's total spending over the cap. Check current spending with `wallet-summary` or `wallet-stats`.
+When set, the proxy will reject any USDC transfer or contract write that would push today's total spending over the cap. Check current spending with `wallet-summary` or `wallet-stats`. (Private deposits count toward this cap.)
+
+Optional: enable private (zero-knowledge) payments:
+```
+CLAWTRL_PRIVACY_ENABLED=true
+CLAWTRL_PRIVACY_CHAIN=base        # or polygon
+```
+Advanced overrides (only if running your own px402 infrastructure):
+`CLAWTRL_PRIVACY_RPC_URL`, `CLAWTRL_PRIVACY_BUNDLER_URL`, `CLAWTRL_PRIVACY_BUNDLER_API_KEY`, `CLAWTRL_PRIVACY_ATTESTOR_URL`, `CLAWTRL_PRIVACY_CIRCUIT_WASM`, `CLAWTRL_PRIVACY_CIRCUIT_ZKEY`.
 
 Then fund the wallet with ETH (for gas) and USDC (for payments) on Base.
 
@@ -300,6 +373,8 @@ Use these guides for planning and implementation details. Use the wallet tools h
 - **viem** — Ethereum wallet, signing, contract interaction
 - **x402-fetch** — x402 v1 protocol (EIP-3009 transferWithAuthorization)
 - **@x402/fetch + @x402/evm** — x402 v2 protocol (Permit2, loaded dynamically)
+- **snarkjs + circomlibjs** — Groth16 proof generation + Poseidon hashing for private payments (loaded lazily, only when privacy is enabled)
+- **graphql + graphql-request** — subgraph queries for Merkle proofs (private payments)
 
 ## Requirements
 

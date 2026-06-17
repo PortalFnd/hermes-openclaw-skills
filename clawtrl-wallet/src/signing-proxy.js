@@ -201,6 +201,58 @@ async function getTokenBalanceRaw(tokenAddress) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Clawtrl Private Payments (vendored px402 ZK engine — see src/privacy/NOTICE.md)
+// Opt-in: only active when CLAWTRL_PRIVACY_ENABLED=true. Notes are stored
+// encrypted (AES-256-GCM) with a key derived from the agent wallet key.
+// ─────────────────────────────────────────────────────────────────────────
+var PRIVACY_ENABLED = (env.CLAWTRL_PRIVACY_ENABLED || process.env.CLAWTRL_PRIVACY_ENABLED || '') === 'true';
+var PRIVACY_CHAIN = (env.CLAWTRL_PRIVACY_CHAIN || process.env.CLAWTRL_PRIVACY_CHAIN || 'base').toLowerCase();
+var _privacyMod = null;
+async function loadPrivacy() {
+  if (_privacyMod) return _privacyMod;
+  // Compiled CommonJS vendored engine lives next to this file in ../privacy-dist
+  var url = new URL('./privacy-dist/clawtrl.js', import.meta.url);
+  _privacyMod = await import(url.href);
+  return _privacyMod;
+}
+// Deterministic note-encryption password derived from the wallet key (never stored).
+var PRIVACY_NOTE_PASSWORD = createHash('sha256').update('clawtrl-privacy-note:' + pk).digest('hex');
+function getPrivacyNotePath() {
+  var candidates = [
+    '/root/.hermes/skills/clawtrl-wallet/privacy-note.enc',
+    '/opt/clawtrl/wallet-tools/privacy-note.enc',
+    HOME + '/.clawtrl/privacy-note.enc',
+  ];
+  for (var i = 0; i < candidates.length; i++) {
+    try { if (existsSync(dirname(candidates[i]))) return candidates[i]; } catch (_e) {}
+  }
+  return HOME + '/.clawtrl-privacy-note.enc';
+}
+var PRIVACY_NOTE_PATH = getPrivacyNotePath();
+async function loadPrivacyNote() {
+  try {
+    if (!existsSync(PRIVACY_NOTE_PATH)) return null;
+    var enc = readFileSync(PRIVACY_NOTE_PATH, 'utf-8').trim();
+    if (!enc) return null;
+    var mod = await loadPrivacy();
+    return await mod.decryptNote(enc, PRIVACY_NOTE_PASSWORD);
+  } catch (e) {
+    console.error('Failed to load privacy note:', e.message);
+    return null;
+  }
+}
+async function savePrivacyNote(note) {
+  var mod = await loadPrivacy();
+  var enc = await mod.encryptNote(note, PRIVACY_NOTE_PASSWORD);
+  writeFileSync(PRIVACY_NOTE_PATH, enc, { mode: 0o600 });
+}
+// Merge a freshly-deposited note's commitments into the stored note (UTXO accumulate).
+function mergeNotes(existing, fresh) {
+  if (!existing || !existing.commitments || existing.commitments.length === 0) return fresh;
+  return { version: fresh.version || existing.version || '2.0', commitments: existing.commitments.concat(fresh.commitments) };
+}
+
 // Initialize x402 payment-wrapped fetch
 var x402Fetch = null;
 if (x402Loaded && x402WrapFetch) {
@@ -256,7 +308,7 @@ async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   if (req.url === '/health') {
-    return jsonRes(res, 200, { status: 'ok', address: account.address, chain: 'base', chainId: 8453 });
+    return jsonRes(res, 200, { status: 'ok', address: account.address, chain: 'base', chainId: 8453, privacy: PRIVACY_ENABLED });
   }
 
   if (req.url === '/identity') {
@@ -690,6 +742,105 @@ async function handler(req, res) {
       // Default: list all
       return jsonRes(res, 200, { labels: book, count: Object.keys(book).length });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  // ── Clawtrl Private Payments (px402 ZK) ────────────────────────────────
+  if (req.url && req.url.indexOf('/privacy/') === 0) {
+    if (!PRIVACY_ENABLED) {
+      return jsonRes(res, 403, {
+        error: 'Private payments are disabled',
+        hint: 'Set CLAWTRL_PRIVACY_ENABLED=true in the environment to opt in.',
+        note: 'Deposits enter the px402 shared privacy pool; see clawtrl-wallet privacy docs.',
+      });
+    }
+
+    if (req.url === '/privacy/status' && req.method === 'GET') {
+      try {
+        var mod = await loadPrivacy();
+        var note = await loadPrivacyNote();
+        var bal = note ? mod.getNoteBalance(note) : 0;
+        return jsonRes(res, 200, {
+          enabled: true, chain: PRIVACY_CHAIN,
+          hasNote: !!note, balance: bal.toFixed(6),
+          commitments: note ? note.commitments.length : 0,
+          allowedDepositAmounts: mod.ALLOWED_DEPOSIT_AMOUNTS,
+        });
+      } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+    }
+
+    if (req.url === '/privacy/balance' && req.method === 'GET') {
+      try {
+        var mod = await loadPrivacy();
+        var note = await loadPrivacyNote();
+        if (!note) return jsonRes(res, 200, { balance: '0.000000', hasNote: false });
+        return jsonRes(res, 200, { balance: mod.getNoteBalance(note).toFixed(6), hasNote: true, commitments: note.commitments.length });
+      } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+    }
+
+    if (req.url === '/privacy/deposit' && req.method === 'POST') {
+      try {
+        var body = JSON.parse(await readBody(req));
+        var amount = Number(body.amount);
+        var mod = await loadPrivacy();
+        if (mod.ALLOWED_DEPOSIT_AMOUNTS.indexOf(amount) < 0) {
+          return jsonRes(res, 400, { error: 'Invalid deposit amount', allowed: mod.ALLOWED_DEPOSIT_AMOUNTS });
+        }
+        var capErr = checkSpendingCap(amount);
+        if (capErr) return jsonRes(res, 403, capErr);
+        // ERC-3009 gasless deposit into the pool (single signed tx).
+        var sdk = mod.createPrivacySDK(PRIVACY_CHAIN);
+        var fresh = await sdk.depositFast(amount, pk);
+        var merged = mergeNotes(await loadPrivacyNote(), fresh);
+        await savePrivacyNote(merged);
+        logTx({ type: 'privacy-deposit', token: 'usdc', amount: String(amount), usdcValue: amount, chain: PRIVACY_CHAIN, status: 'confirmed' });
+        return jsonRes(res, 200, { success: true, deposited: amount, balance: mod.getNoteBalance(merged).toFixed(6), chain: PRIVACY_CHAIN });
+      } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+    }
+
+    if (req.url === '/privacy/pay' && req.method === 'POST') {
+      try {
+        var body = JSON.parse(await readBody(req));
+        if (!body.to || !isAddress(body.to)) return jsonRes(res, 400, { error: 'valid "to" address required' });
+        var amount = Number(body.amount);
+        if (!amount || amount <= 0) return jsonRes(res, 400, { error: 'positive "amount" (USDC) required' });
+        var mod = await loadPrivacy();
+        var note = await loadPrivacyNote();
+        if (!note) return jsonRes(res, 400, { error: 'No private balance. Deposit first with private-deposit.' });
+        if (!mod.hasEnoughBalance(note, amount)) {
+          return jsonRes(res, 400, { error: 'Insufficient private balance', have: mod.getNoteBalance(note).toFixed(6), need: String(amount) });
+        }
+        var sdk = mod.createPrivacySDK(PRIVACY_CHAIN);
+        sdk.setNote(note);
+        var result = await sdk.makePayment(note, body.to, amount);
+        await savePrivacyNote(result.note);
+        logTx({ type: 'privacy-payment', token: 'usdc', amount: String(amount), usdcValue: amount, to: body.to, hash: result.txHash, chain: PRIVACY_CHAIN, status: 'confirmed' });
+        return jsonRes(res, 200, { success: true, txHash: result.txHash, to: body.to, amount: amount, balance: mod.getNoteBalance(result.note).toFixed(6) });
+      } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+    }
+
+    if (req.url === '/privacy/fetch' && req.method === 'POST') {
+      try {
+        var body = JSON.parse(await readBody(req));
+        if (!body.url) return jsonRes(res, 400, { error: 'url required' });
+        var mod = await loadPrivacy();
+        var note = await loadPrivacyNote();
+        if (!note) return jsonRes(res, 400, { error: 'No private balance. Deposit first with private-deposit.' });
+        var sdk = mod.createPrivacySDK(PRIVACY_CHAIN);
+        sdk.setNote(note);
+        var privateFetch = sdk.wrapFetch(globalThis.fetch);
+        var init = { method: body.method || 'GET', headers: body.headers || {} };
+        if (body.body) { init.body = typeof body.body === 'string' ? body.body : JSON.stringify(body.body); init.headers['Content-Type'] = init.headers['Content-Type'] || 'application/json'; }
+        var resp = await privateFetch(body.url, init);
+        var text = await resp.text();
+        var updated = sdk.getUpdatedNote();
+        if (updated) await savePrivacyNote(updated);
+        logTx({ type: 'privacy-fetch', url: body.url, status: resp.status, chain: PRIVACY_CHAIN });
+        var out; try { out = JSON.parse(text); } catch (_e) { out = text; }
+        return jsonRes(res, 200, { status: resp.status, ok: resp.ok, data: out, balance: updated ? mod.getNoteBalance(updated).toFixed(6) : undefined });
+      } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+    }
+
+    return jsonRes(res, 404, { error: 'unknown privacy endpoint', endpoints: ['/privacy/status', '/privacy/balance', '/privacy/deposit', '/privacy/pay', '/privacy/fetch'] });
   }
 
   jsonRes(res, 404, { error: 'not found' });

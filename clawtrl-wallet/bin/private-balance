@@ -1,0 +1,4 @@
+#!/bin/bash
+# Show private (shielded) USDC balance held in encrypted notes
+# Usage: private-balance
+curl -sf http://127.0.0.1:8128/privacy/balance 2>/dev/null || echo '{"error":"signing proxy not running"}'

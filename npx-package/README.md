@@ -49,7 +49,7 @@ Agent → shell tool (curl) → signing proxy (:8128) → Base chain
 
 ## Links
 
-- [Source Code](https://github.com/PortalFnd/openclaw-skills)
+- [Source Code](https://github.com/PortalFnd/hermes-openclaw-skills)
 - [Clawtrl](https://clawtrl.com)
 - [ERC-8128](https://erc8128.org)
 - [x402 Protocol](https://docs.x402.org)

@@ -3,11 +3,11 @@
 # Works with or without root/sudo.
 #
 # With root (VPS):
-#   curl -sSL https://raw.githubusercontent.com/PortalFnd/openclaw-skills/main/clawtrl-wallet/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/PortalFnd/hermes-openclaw-skills/main/clawtrl-wallet/install.sh | sudo bash
 #   Installs to /opt/clawtrl/, sets up systemd service, symlinks to /usr/local/bin/
 #
 # Without root (agent / container):
-#   curl -sSL https://raw.githubusercontent.com/PortalFnd/openclaw-skills/main/clawtrl-wallet/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/PortalFnd/hermes-openclaw-skills/main/clawtrl-wallet/install.sh | bash
 #   Installs to ~/.clawtrl/, adds to PATH, runs proxy as background process
 #
 # Via npx:
@@ -16,8 +16,8 @@
 
 set -e
 
-REPO="https://github.com/PortalFnd/openclaw-skills"
-RAW="https://raw.githubusercontent.com/PortalFnd/openclaw-skills/main/clawtrl-wallet"
+REPO="https://github.com/PortalFnd/hermes-openclaw-skills"
+RAW="https://raw.githubusercontent.com/PortalFnd/hermes-openclaw-skills/main/clawtrl-wallet"
 
 # Detect root vs non-root
 if [ "$(id -u)" = "0" ]; then
@@ -83,10 +83,27 @@ echo "[2/6] Installing signing proxy..."
 if [ -n "$SKILL_DIR" ]; then
   cp "$SKILL_DIR/package.json" "$INSTALL_DIR/package.json"
   cp "$SKILL_DIR/src/signing-proxy.js" "$INSTALL_DIR/src/signing-proxy.js"
+  # Vendored Clawtrl Private Payments engine (source + prebuilt CommonJS dist)
+  if [ -d "$SKILL_DIR/src/privacy" ]; then cp -R "$SKILL_DIR/src/privacy" "$INSTALL_DIR/src/privacy"; fi
+  if [ -d "$SKILL_DIR/src/privacy-dist" ]; then cp -R "$SKILL_DIR/src/privacy-dist" "$INSTALL_DIR/src/privacy-dist"; fi
 else
   echo "       Downloading from GitHub..."
   curl -sSL "$RAW/package.json" -o "$INSTALL_DIR/package.json"
   curl -sSL "$RAW/src/signing-proxy.js" -o "$INSTALL_DIR/src/signing-proxy.js"
+  # Fetch the vendored privacy engine (prebuilt dist) via repo tarball so the
+  # whole directory comes across in one shot.
+  echo "       Fetching private-payments engine..."
+  TARBALL="https://codeload.github.com/PortalFnd/hermes-openclaw-skills/tar.gz/refs/heads/main"
+  TMP_TAR="$(mktemp -d)"
+  if curl -sSL "$TARBALL" -o "$TMP_TAR/repo.tgz" && tar -xzf "$TMP_TAR/repo.tgz" -C "$TMP_TAR" 2>/dev/null; then
+    SRC_PRIV="$(find "$TMP_TAR" -type d -path '*clawtrl-wallet/src/privacy' | head -1)"
+    SRC_DIST="$(find "$TMP_TAR" -type d -path '*clawtrl-wallet/src/privacy-dist' | head -1)"
+    [ -n "$SRC_PRIV" ] && cp -R "$SRC_PRIV" "$INSTALL_DIR/src/privacy"
+    [ -n "$SRC_DIST" ] && cp -R "$SRC_DIST" "$INSTALL_DIR/src/privacy-dist"
+  else
+    echo "       (warning) could not fetch privacy engine; private payments will be unavailable"
+  fi
+  rm -rf "$TMP_TAR"
 fi
 
 # Install npm dependencies
@@ -99,7 +116,7 @@ npm install --production 2>&1 | tail -3 || {
 
 # Install shell tools
 echo "[4/6] Installing shell tools..."
-TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll token-balance tx-status contract-read contract-write ens-resolve gas-estimate wallet-tx-log token-allowance token-revoke wallet-summary wallet-stats contract-events token-price wallet-label"
+TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll token-balance tx-status contract-read contract-write ens-resolve gas-estimate wallet-tx-log token-allowance token-revoke wallet-summary wallet-stats contract-events token-price wallet-label private-status private-balance private-deposit private-pay private-fetch"
 for tool in $TOOLS; do
   if [ -n "$SKILL_DIR" ]; then
     cp "$SKILL_DIR/bin/$tool" "$TOOLS_DIR/$tool"
@@ -250,6 +267,17 @@ echo "    wallet-stats     — spending analytics from transaction history"
 echo "    contract-events  — query past events from any contract"
 echo "    token-price      — USD price via Chainlink (ETH, USDC, DAI, etc.)"
 echo "    wallet-label     — label addresses for human-readable references"
+echo "  -- Private payments (opt-in: CLAWTRL_PRIVACY_ENABLED=true) --"
+echo "    private-status   — privacy on/off + shielded balance"
+echo "    private-balance  — shielded (private) USDC balance"
+echo "    private-deposit  — shield USDC into the privacy pool"
+echo "    private-pay      — unlinkable USDC payment (burner + ZK proof)"
+echo "    private-fetch    — x402 request paid privately"
 echo "  ══════════════════════════════════════"
+if [ "${CLAWTRL_PRIVACY_ENABLED:-}" != "true" ]; then
+  echo "  Private payments are OFF. Enable with CLAWTRL_PRIVACY_ENABLED=true"
+  echo "  in your .env, then restart the proxy."
+  echo "  ══════════════════════════════════════"
+fi
 echo "  Source: $REPO"
 echo ""

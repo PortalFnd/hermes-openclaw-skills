@@ -1,0 +1,8 @@
+#!/bin/bash
+# Shield USDC: deposit from the public wallet into the privacy pool, creating an
+# encrypted private note. Allowed amounts: 0.01, 0.1, 1, 10, 100
+# Usage: private-deposit <amount>
+#   private-deposit 1
+AMOUNT="$1"
+if [ -z "$AMOUNT" ]; then echo '{"error":"Usage: private-deposit <amount> (allowed: 0.01, 0.1, 1, 10, 100)"}'; exit 1; fi
+curl -sf -X POST http://127.0.0.1:8128/privacy/deposit -H 'Content-Type: application/json' -d "{\"amount\":$AMOUNT}" 2>/dev/null || echo '{"error":"signing proxy not running or privacy disabled"}'

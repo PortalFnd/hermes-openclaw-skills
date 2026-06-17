@@ -1,0 +1,11 @@
+# Local build / dependency artifacts — do NOT commit
+node_modules/
+package-lock.json
+
+# Local runtime state
+proxy.log
+proxy.pid
+*.enc
+
+# NOTE: src/privacy-dist/ IS committed on purpose — it's the prebuilt
+# CommonJS build of the vendored privacy engine shipped to install targets.

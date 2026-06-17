@@ -1,0 +1,4 @@
+#!/bin/bash
+# Show Clawtrl private-payments status: enabled flag, private balance, commitments
+# Usage: private-status
+curl -sf http://127.0.0.1:8128/privacy/status 2>/dev/null || echo '{"error":"signing proxy not running"}'

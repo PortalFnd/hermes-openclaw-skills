@@ -1,6 +1,6 @@
 {
   "name": "clawtrl-wallet",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Crypto wallet for AI agents on OpenClaw and Hermes — ERC-8128 signing, x402 payments, transfers on Base",
   "bin": {
     "clawtrl-wallet": "./cli.js"
@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PortalFnd/openclaw-skills"
+    "url": "https://github.com/PortalFnd/hermes-openclaw-skills"
   },
   "homepage": "https://clawtrl.com/skills",
   "engines": {

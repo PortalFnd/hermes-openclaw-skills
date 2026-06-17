@@ -1,0 +1,9 @@
+#!/bin/bash
+# Make a private (unlinkable) USDC payment from your shielded note balance.
+# Uses a fresh burner wallet + ZK proof so the payment is not tied to your wallet.
+# Usage: private-pay <to_address> <amount>
+#   private-pay 0x1234...abcd 0.5
+TO="$1"
+AMOUNT="$2"
+if [ -z "$TO" ] || [ -z "$AMOUNT" ]; then echo '{"error":"Usage: private-pay <to_address> <amount>"}'; exit 1; fi
+curl -sf -X POST http://127.0.0.1:8128/privacy/pay -H 'Content-Type: application/json' -d "{\"to\":\"$TO\",\"amount\":$AMOUNT}" 2>/dev/null || echo '{"error":"signing proxy not running or privacy disabled"}'
