@@ -1,6 +1,6 @@
 {
   "name": "clawtrl-wallet",
-  "version": "1.2.2",
+  "version": "1.2.4",
   "description": "Crypto wallet on Base with ERC-8128 signing, x402 autonomous payments, private (ZK) x402 payments, and transfers. Compatible with OpenClaw and Hermes agents.",
   "type": "module",
   "dependencies": {
@@ -10,7 +10,9 @@
     "snarkjs": "^0.7.0",
     "circomlibjs": "^0.1.7",
     "graphql": "^16.12.0",
-    "graphql-request": "^7.3.4"
+    "graphql-request": "^7.3.4",
+    "ws": "^8.21.0",
+    "underscore": "^1.13.8"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
@@ -26,9 +28,9 @@
   },
   "author": "Clawtrl",
   "license": "MIT",
-  "homepage": "https://clawtrl.com/skills",
+  "homepage": "https://clawtrl.portalfoundation.ai/skills",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PortalFnd/hermes-openclaw-skills"
+    "url": "git+https://github.com/PortalFnd/hermes-openclaw-skills.git"
   }
 }
