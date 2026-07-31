@@ -5,9 +5,11 @@
 TO="$1"
 VALUE="${2:-0}"
 DATA="$3"
+CHAIN="${4:-${WALLET_CHAIN:-}}"
 PAYLOAD="{\"value\":\"$VALUE\""
 if [ -n "$TO" ]; then PAYLOAD="$PAYLOAD,\"address\":\"$TO\""; fi
 if [ -n "$DATA" ]; then PAYLOAD="$PAYLOAD,\"data\":\"$DATA\""; fi
+if [ -n "$CHAIN" ]; then PAYLOAD="$PAYLOAD,\"chain\":\"$CHAIN\""; fi
 PAYLOAD="$PAYLOAD}"
 curl -sf -X POST http://127.0.0.1:8128/gas-estimate \
   -H 'Content-Type: application/json' \

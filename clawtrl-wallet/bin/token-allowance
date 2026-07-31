@@ -3,10 +3,13 @@
 # Usage: token-allowance <token_address> <spender_address>
 TOKEN="$1"
 SPENDER="$2"
+CHAIN="${3:-${WALLET_CHAIN:-}}"
 if [ -z "$TOKEN" ] || [ -z "$SPENDER" ]; then
-  echo '{"error":"Usage: token-allowance <token_address> <spender_address>"}'
+  echo '{"error":"Usage: token-allowance <token_address> <spender_address> [chain]"}'
   exit 1
 fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
 curl -sf -X POST http://127.0.0.1:8128/token-allowance \
   -H 'Content-Type: application/json' \
-  -d "{\"token\":\"$TOKEN\",\"spender\":\"$SPENDER\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+  -d "{\"token\":\"$TOKEN\",\"spender\":\"$SPENDER\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

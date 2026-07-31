@@ -3,12 +3,15 @@
 # Usage: token-price [token]
 # Supported: eth, usdc, usdt, weth, dai (or pass a custom Chainlink feed address)
 TOKEN="${1:-eth}"
+CHAIN="${2:-${WALLET_CHAIN:-}}"
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
 if [[ "$TOKEN" == 0x* ]]; then
   curl -sf -X POST http://127.0.0.1:8128/token-price \
     -H 'Content-Type: application/json' \
-    -d "{\"feed\":\"$TOKEN\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+    -d "{\"feed\":\"$TOKEN\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
 else
   curl -sf -X POST http://127.0.0.1:8128/token-price \
     -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$TOKEN\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+    -d "{\"token\":\"$TOKEN\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
 fi

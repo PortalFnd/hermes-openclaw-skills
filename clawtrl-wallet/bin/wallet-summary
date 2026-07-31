@@ -1,3 +1,7 @@
 #!/bin/bash
 # wallet-summary — Full wallet overview: balances, spending, approvals, recent activity
-curl -sf http://127.0.0.1:8128/wallet-summary 2>/dev/null || echo '{"error":"signing proxy not running"}'
+# Usage: wallet-summary [chain]   — chains: base | base-sepolia | robinhood | robinhood-testnet
+CHAIN="${1:-${WALLET_CHAIN:-}}"
+QS=""
+if [ -n "$CHAIN" ]; then QS="?chain=$CHAIN"; fi
+curl -sf "http://127.0.0.1:8128/wallet-summary$QS" 2>/dev/null || echo '{"error":"signing proxy not running"}'

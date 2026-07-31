@@ -1,11 +1,16 @@
 #!/bin/bash
-# Send ETH or USDC to an address on Base
-# Usage: crypto-send <to_address> <amount> [token]
+# Send ETH or USDC to an address. Multi-chain: Base (default) + Robinhood Chain.
+# Usage: crypto-send <to_address> <amount> [token] [chain]
+# Chains: base (default) | base-sepolia | robinhood | robinhood-testnet
 # Examples:
 #   crypto-send 0x1234...abcd 0.01 eth
 #   crypto-send 0x1234...abcd 5.00 usdc
+#   crypto-send 0x1234...abcd 0.01 eth robinhood
 TO="$1"
 AMOUNT="$2"
 TOKEN="${3:-eth}"
-if [ -z "$TO" ] || [ -z "$AMOUNT" ]; then echo '{"error":"Usage: crypto-send <to_address> <amount> [eth|usdc]"}'; exit 1; fi
-curl -sf -X POST http://127.0.0.1:8128/transfer -H 'Content-Type: application/json' -d "{\"to\":\"$TO\",\"amount\":\"$AMOUNT\",\"token\":\"$TOKEN\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+CHAIN="${4:-${WALLET_CHAIN:-}}"
+if [ -z "$TO" ] || [ -z "$AMOUNT" ]; then echo '{"error":"Usage: crypto-send <to_address> <amount> [eth|usdc] [chain]"}'; exit 1; fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
+curl -sf -X POST http://127.0.0.1:8128/transfer -H 'Content-Type: application/json' -d "{\"to\":\"$TO\",\"amount\":\"$AMOUNT\",\"token\":\"$TOKEN\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

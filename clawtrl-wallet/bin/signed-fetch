@@ -7,8 +7,10 @@
 URL="$1"
 METHOD="${2:-GET}"
 BODY="$3"
-if [ -z "$URL" ]; then echo '{"error":"Usage: signed-fetch <url> [method] [body]"}'; exit 1; fi
+CHAIN="${WALLET_CHAIN:-}"
+if [ -z "$URL" ]; then echo '{"error":"Usage: signed-fetch <url> [method] [body]","hint":"Set WALLET_CHAIN=robinhood to sign for Robinhood Chain"}'; exit 1; fi
 PAYLOAD="{\"url\":\"$URL\",\"method\":\"$METHOD\""
 if [ -n "$BODY" ]; then PAYLOAD="$PAYLOAD,\"body\":$BODY"; fi
+if [ -n "$CHAIN" ]; then PAYLOAD="$PAYLOAD,\"chain\":\"$CHAIN\""; fi
 PAYLOAD="$PAYLOAD}"
 curl -sf -X POST http://127.0.0.1:8128/fetch -H 'Content-Type: application/json' -d "$PAYLOAD" 2>/dev/null || echo '{"error":"signing proxy not running"}'

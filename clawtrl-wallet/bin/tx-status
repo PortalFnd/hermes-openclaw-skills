@@ -3,10 +3,13 @@
 # Usage: tx-status <tx_hash>
 # Returns: status (success, reverted, or pending), block number, gas used.
 HASH="$1"
+CHAIN="${2:-${WALLET_CHAIN:-}}"
 if [ -z "$HASH" ]; then
-  echo '{"error":"Usage: tx-status <tx_hash>"}'
+  echo '{"error":"Usage: tx-status <tx_hash> [chain]"}'
   exit 1
 fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
 curl -sf -X POST http://127.0.0.1:8128/tx-status \
   -H 'Content-Type: application/json' \
-  -d "{\"hash\":\"$HASH\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+  -d "{\"hash\":\"$HASH\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

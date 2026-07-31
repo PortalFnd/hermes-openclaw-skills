@@ -4,8 +4,33 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
-import { createWalletClient, createPublicClient, http, parseUnits, formatUnits, encodeFunctionData, parseAbiItem, isAddress, namehash } from 'viem';
-import { base, mainnet } from 'viem/chains';
+import { createWalletClient, createPublicClient, http, parseUnits, formatUnits, encodeFunctionData, parseAbiItem, isAddress, namehash, defineChain } from 'viem';
+import { base, baseSepolia, mainnet, arbitrum, optimism, polygon, bsc, avalanche } from 'viem/chains';
+
+// Robinhood Chain — Arbitrum Orbit L2, ETH gas, EVM-compatible
+var robinhood = defineChain({
+  id: 4663,
+  name: 'Robinhood Chain',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.mainnet.chain.robinhood.com'] } },
+  blockExplorers: { default: { name: 'Blockscout', url: 'https://robinhoodchain.blockscout.com' } },
+});
+var robinhoodTestnet = defineChain({
+  id: 46630,
+  name: 'Robinhood Chain Testnet',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.testnet.chain.robinhood.com'] } },
+  blockExplorers: { default: { name: 'Blockscout', url: 'https://explorer.testnet.chain.robinhood.com' } },
+  testnet: true,
+});
+
+// Chain registry — select with CLAWTRL_WALLET_CHAIN (or AGENT_WALLET_CHAIN). Default: base.
+var CHAIN_REGISTRY = {
+  base: { chain: base, rpc: 'https://mainnet.base.org', usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+  'base-sepolia': { chain: baseSepolia, rpc: 'https://sepolia.base.org', usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' },
+  robinhood: { chain: robinhood, rpc: 'https://rpc.mainnet.chain.robinhood.com', usdc: null },
+  'robinhood-testnet': { chain: robinhoodTestnet, rpc: 'https://rpc.testnet.chain.robinhood.com', usdc: null },
+};
 
 // Polyfill global fetch (required by @x402/fetch, may be missing in some Node builds)
 if (typeof globalThis.fetch === 'undefined') {
@@ -47,8 +72,6 @@ try {
   }
 }
 
-var USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-
 function loadEnv(path) {
   try {
     var content = readFileSync(path, 'utf-8');
@@ -69,30 +92,64 @@ var env = loadEnv('/opt/openclaw/.env');
 if (!env.AGENT_WALLET_PRIVATE_KEY) env = loadEnv(HOME + '/.clawtrl/.env');
 if (!env.AGENT_WALLET_PRIVATE_KEY) env = loadEnv(HOME + '/.env');
 if (!env.AGENT_WALLET_PRIVATE_KEY) env = loadEnv('.env');
-var pk = env.AGENT_WALLET_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY;
+var pk = env.AGENT_WALLET_PRIVATE_KEY || process.env.AGENT_WALLET_PRIVATE_KEY || env.CLAWTRL_WALLET_PRIVATE_KEY || process.env.CLAWTRL_WALLET_PRIVATE_KEY;
 if (!pk || !pk.startsWith('0x')) {
   console.error('AGENT_WALLET_PRIVATE_KEY not found or invalid');
   console.error('Searched: /opt/openclaw/.env, ~/.clawtrl/.env, ~/.env, .env, $AGENT_WALLET_PRIVATE_KEY');
   process.exit(1);
 }
 
+// Default chain — CLAWTRL_WALLET_CHAIN (env file or process env), default: base.
+// Every endpoint also accepts an optional "chain" field to use any registered chain.
+var DEFAULT_CHAIN_NAME = (env.CLAWTRL_WALLET_CHAIN || process.env.CLAWTRL_WALLET_CHAIN || env.AGENT_WALLET_CHAIN || process.env.AGENT_WALLET_CHAIN || 'base').toLowerCase();
+if (!CHAIN_REGISTRY[DEFAULT_CHAIN_NAME]) {
+  console.error('Unknown chain "' + DEFAULT_CHAIN_NAME + '". Available: ' + Object.keys(CHAIN_REGISTRY).join(', '));
+  process.exit(1);
+}
 var account = privateKeyToAccount(pk);
 
-var walletClient = createWalletClient({
-  account: account,
-  chain: base,
-  transport: http('https://mainnet.base.org'),
-});
-var publicClient = createPublicClient({
-  chain: base,
-  transport: http('https://mainnet.base.org'),
-});
+// Lazy per-chain client factory — one wallet/public client pair per chain, created on first use
+var _chainClients = {};
+function getChainCtx(name) {
+  var key = (name || DEFAULT_CHAIN_NAME || 'base').toLowerCase();
+  var def = CHAIN_REGISTRY[key];
+  if (!def) return null;
+  if (!_chainClients[key]) {
+    var rpc = (key === DEFAULT_CHAIN_NAME && (env.CLAWTRL_WALLET_RPC_URL || process.env.CLAWTRL_WALLET_RPC_URL || env.AGENT_WALLET_RPC_URL || process.env.AGENT_WALLET_RPC_URL)) || def.rpc;
+    var usdc = (key === DEFAULT_CHAIN_NAME && (env.CLAWTRL_WALLET_USDC || process.env.CLAWTRL_WALLET_USDC)) || def.usdc;
+    _chainClients[key] = {
+      name: key,
+      chain: def.chain,
+      usdc: usdc,
+      wallet: createWalletClient({ account: account, chain: def.chain, transport: http(rpc) }),
+      public: createPublicClient({ chain: def.chain, transport: http(rpc) }),
+    };
+  }
+  return _chainClients[key];
+}
+function chainCtxOr400(res, name) {
+  var ctx = getChainCtx(name);
+  if (!ctx) jsonRes(res, 400, { error: 'Unknown chain "' + name + '"', available: Object.keys(CHAIN_REGISTRY), default: DEFAULT_CHAIN_NAME });
+  return ctx;
+}
+var DEFAULT_CTX = getChainCtx(DEFAULT_CHAIN_NAME);
+console.log('Default chain: ' + DEFAULT_CHAIN_NAME + ' (id ' + DEFAULT_CTX.chain.id + '). All endpoints accept "chain": ' + Object.keys(CHAIN_REGISTRY).join(' | '));
 
 // Mainnet client for ENS lookups (ENS lives on Ethereum mainnet)
 var mainnetClient = createPublicClient({
   chain: mainnet,
   transport: http('https://eth.llamarpc.com'),
 });
+
+// Multi-chain client factory for raw tx / approve endpoints (LI.FI bridge flows).
+// Keyed by numeric chainId — includes Robinhood Chain so bridge routes can settle there.
+var BRIDGE_CHAIN_OBJ = { 1: mainnet, 8453: base, 84532: baseSepolia, 42161: arbitrum, 10: optimism, 137: polygon, 56: bsc, 43114: avalanche, 4663: robinhood, 46630: robinhoodTestnet };
+var BRIDGE_CHAIN_RPC = { 1: 'https://eth.llamarpc.com', 8453: 'https://mainnet.base.org', 84532: 'https://sepolia.base.org', 42161: 'https://arb1.arbitrum.io/rpc', 10: 'https://mainnet.optimism.io', 137: 'https://polygon-rpc.com', 56: 'https://bsc-dataseed.binance.org', 43114: 'https://api.avax.network/ext/bc/C/rpc', 4663: 'https://rpc.mainnet.chain.robinhood.com', 46630: 'https://rpc.testnet.chain.robinhood.com' };
+function getBridgeClients(chainId) {
+  var c = BRIDGE_CHAIN_OBJ[chainId] || base;
+  var rpc = BRIDGE_CHAIN_RPC[chainId] || 'https://mainnet.base.org';
+  return { wc: createWalletClient({ account: account, chain: c, transport: http(rpc) }), pc: createPublicClient({ chain: c, transport: http(rpc) }) };
+}
 
 // ERC-20 minimal ABI
 var ERC20_ABI = [
@@ -187,16 +244,17 @@ function checkSpendingCap(usdcAmount) {
 }
 
 // Read raw balance helpers (used by precheck + balance endpoints)
-async function getEthBalanceWei() {
-  return await publicClient.getBalance({ address: account.address });
+async function getEthBalanceWei(ctx) {
+  return await ctx.public.getBalance({ address: account.address });
 }
-async function getUsdcBalanceRaw() {
-  return await publicClient.readContract({
-    address: USDC, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+async function getUsdcBalanceRaw(ctx) {
+  if (!ctx.usdc) return 0n;
+  return await ctx.public.readContract({
+    address: ctx.usdc, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   });
 }
-async function getTokenBalanceRaw(tokenAddress) {
-  return await publicClient.readContract({
+async function getTokenBalanceRaw(ctx, tokenAddress) {
+  return await ctx.public.readContract({
     address: tokenAddress, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   });
 }
@@ -262,10 +320,10 @@ if (x402Loaded && x402WrapFetch) {
       var evmMod = await import('@x402/evm/exact/client');
       evmMod.registerExactEvmScheme(x402ClientInstance, { signer: account });
       x402Fetch = x402WrapFetch(globalThis.fetch, x402ClientInstance);
-      console.log('x402 v2 payment fetch ready (scheme: exact, network: base)');
+      console.log('x402 v2 payment fetch ready (scheme: exact, default chain: ' + DEFAULT_CHAIN_NAME + ')');
     } else {
       // v1 fallback: wrapFetchWithPayment(fetch, walletClient)
-      x402Fetch = x402WrapFetch(globalThis.fetch, walletClient);
+      x402Fetch = x402WrapFetch(globalThis.fetch, DEFAULT_CTX.wallet);
       console.log('x402 v1 payment fetch ready');
     }
   } catch(e) {
@@ -274,17 +332,18 @@ if (x402Loaded && x402WrapFetch) {
 }
 
 // ERC-8128: sign an HTTP request with the agent wallet
-async function erc8128Sign(url, method, body) {
+async function erc8128Sign(url, method, body, chainId) {
   var timestamp = Math.floor(Date.now() / 1000).toString();
   var bodyStr = body || '';
   var bodyHash = createHash('sha256').update(bodyStr).digest('hex');
-  var message = [method.toUpperCase(), url, bodyHash, timestamp, '8453'].join('\n');
+  var cid = String(chainId || DEFAULT_CTX.chain.id);
+  var message = [method.toUpperCase(), url, bodyHash, timestamp, cid].join('\n');
   var signature = await account.signMessage({ message: message });
   return {
     'X-ERC8128-Address': account.address,
     'X-ERC8128-Signature': signature,
     'X-ERC8128-Timestamp': timestamp,
-    'X-ERC8128-Chain-Id': '8453',
+    'X-ERC8128-Chain-Id': cid,
   };
 }
 
@@ -308,23 +367,30 @@ async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   if (req.url === '/health') {
-    return jsonRes(res, 200, { status: 'ok', address: account.address, chain: 'base', chainId: 8453, privacy: PRIVACY_ENABLED });
+    return jsonRes(res, 200, { status: 'ok', address: account.address, chain: DEFAULT_CHAIN_NAME, chainId: DEFAULT_CTX.chain.id, chains: Object.keys(CHAIN_REGISTRY), privacy: PRIVACY_ENABLED });
   }
 
   if (req.url === '/identity') {
-    return jsonRes(res, 200, { address: account.address, chain: 'base', chainId: 8453 });
+    return jsonRes(res, 200, { address: account.address, chain: DEFAULT_CHAIN_NAME, chainId: DEFAULT_CTX.chain.id, chains: Object.keys(CHAIN_REGISTRY) });
   }
 
-  if (req.url === '/balance') {
+  if (req.url === '/balance' || req.url.indexOf('/balance?') === 0) {
     try {
-      var ethBal = await publicClient.getBalance({ address: account.address });
-      var usdcBal = await publicClient.readContract({
-        address: USDC, abi: [{ name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }],
-        functionName: 'balanceOf', args: [account.address],
-      });
+      var bqs = req.url.indexOf('?') > -1 ? req.url.split('?')[1] : '';
+      var bqm = /chain=([a-z0-9-]+)/.exec(bqs);
+      var bctx = chainCtxOr400(res, bqm ? bqm[1] : null);
+      if (!bctx) return;
+      var ethBal = await bctx.public.getBalance({ address: account.address });
+      var usdcBal = 0n;
+      if (bctx.usdc) {
+        usdcBal = await bctx.public.readContract({
+          address: bctx.usdc, abi: [{ name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }],
+          functionName: 'balanceOf', args: [account.address],
+        });
+      }
       var formatEther = function(wei) { return (Number(wei) / 1e18).toFixed(8); };
       var formatUsdc = function(raw) { return (Number(raw) / 1e6).toFixed(2); };
-      return jsonRes(res, 200, { address: account.address, chain: 'base', eth: formatEther(ethBal), usdc: formatUsdc(usdcBal) });
+      return jsonRes(res, 200, { address: account.address, chain: bctx.name, eth: formatEther(ethBal), usdc: formatUsdc(usdcBal) });
     } catch(e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
@@ -332,6 +398,8 @@ async function handler(req, res) {
     try {
       var body = JSON.parse(await readBody(req));
       if (!body.to || !body.amount) return jsonRes(res, 400, { error: 'to and amount required' });
+      var tctx = chainCtxOr400(res, body.chain);
+      if (!tctx) return;
 
       // Resolve ENS if recipient looks like a name
       var toAddr = body.to;
@@ -346,39 +414,40 @@ async function handler(req, res) {
 
       var token = (body.token || 'eth').toLowerCase();
       var txHash;
+      if (token === 'usdc' && !tctx.usdc) return jsonRes(res, 400, { error: 'USDC is not configured on ' + tctx.name + '. Set CLAWTRL_WALLET_USDC to enable.' });
       // Spending cap check
       if (token === 'usdc') {
         var capErr = checkSpendingCap(body.amount);
         if (capErr) return jsonRes(res, 403, capErr);
       }
       // Balance precheck (reject early if insufficient)
-      var ethBal = await getEthBalanceWei();
+      var ethBal = await getEthBalanceWei(tctx);
       if (token === 'usdc') {
         var amt = parseUnits(String(body.amount), 6);
-        var usdcBal = await getUsdcBalanceRaw();
+        var usdcBal = await getUsdcBalanceRaw(tctx);
         if (usdcBal < amt) {
           return jsonRes(res, 400, { error: 'Insufficient USDC balance', have: formatUnits(usdcBal, 6), need: String(body.amount) });
         }
         if (ethBal === 0n) {
-          return jsonRes(res, 400, { error: 'No ETH for gas on Base. Fund the wallet with a small amount of ETH first.' });
+          return jsonRes(res, 400, { error: 'No ETH for gas on ' + tctx.chain.name + '. Fund the wallet with a small amount of ETH first.' });
         }
         var data = encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [toAddr, amt] });
-        txHash = await walletClient.sendTransaction({ to: USDC, data: data });
+        txHash = await tctx.wallet.sendTransaction({ to: tctx.usdc, data: data });
       } else {
         var weiAmount = BigInt(Math.floor(Number(body.amount) * 1e18));
         if (ethBal < weiAmount) {
           return jsonRes(res, 400, { error: 'Insufficient ETH balance', have: (Number(ethBal) / 1e18).toFixed(8), need: String(body.amount) });
         }
-        txHash = await walletClient.sendTransaction({ to: toAddr, value: weiAmount });
+        txHash = await tctx.wallet.sendTransaction({ to: toAddr, value: weiAmount });
       }
-      logTx({ type: 'transfer', token: token, amount: body.amount, to: toAddr, originalTo: body.to, hash: txHash, status: 'submitted', usdcValue: token === 'usdc' ? body.amount : undefined });
+      logTx({ type: 'transfer', chain: tctx.name, token: token, amount: body.amount, to: toAddr, originalTo: body.to, hash: txHash, status: 'submitted', usdcValue: token === 'usdc' ? body.amount : undefined });
       try {
-        await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 30000 });
-        logTx({ type: 'transfer', token: token, amount: body.amount, to: toAddr, hash: txHash, status: 'confirmed' });
+        await tctx.public.waitForTransactionReceipt({ hash: txHash, timeout: 30000 });
+        logTx({ type: 'transfer', chain: tctx.name, token: token, amount: body.amount, to: toAddr, hash: txHash, status: 'confirmed' });
       } catch (_e) {
         // Timed out waiting — still return the hash; user can check tx-status
       }
-      return jsonRes(res, 200, { success: true, hash: txHash, token: token, amount: body.amount, to: toAddr, resolved: toAddr !== body.to });
+      return jsonRes(res, 200, { success: true, hash: txHash, chain: tctx.name, token: token, amount: body.amount, to: toAddr, resolved: toAddr !== body.to });
     } catch(e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
@@ -386,14 +455,16 @@ async function handler(req, res) {
     try {
       var body = JSON.parse(await readBody(req));
       if (!body.token || !isAddress(body.token)) return jsonRes(res, 400, { error: 'token (ERC-20 contract address) required' });
-      var raw = await getTokenBalanceRaw(body.token);
+      var tbctx = chainCtxOr400(res, body.chain);
+      if (!tbctx) return;
+      var raw = await getTokenBalanceRaw(tbctx, body.token);
       var decimals = 18; var symbol = '';
-      try { decimals = Number(await publicClient.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
-      try { symbol = String(await publicClient.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
+      try { decimals = Number(await tbctx.public.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
+      try { symbol = String(await tbctx.public.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
       return jsonRes(res, 200, {
         token: body.token, symbol: symbol, decimals: decimals,
         balance: formatUnits(raw, decimals), raw: raw.toString(),
-        address: account.address, chain: 'base',
+        address: account.address, chain: tbctx.name,
       });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
@@ -402,19 +473,21 @@ async function handler(req, res) {
     try {
       var body = JSON.parse(await readBody(req));
       if (!body.hash) return jsonRes(res, 400, { error: 'hash required' });
+      var txctx = chainCtxOr400(res, body.chain);
+      if (!txctx) return;
       try {
-        var receipt = await publicClient.getTransactionReceipt({ hash: body.hash });
+        var receipt = await txctx.public.getTransactionReceipt({ hash: body.hash });
         return jsonRes(res, 200, {
           hash: body.hash, status: receipt.status, blockNumber: receipt.blockNumber.toString(),
-          gasUsed: receipt.gasUsed.toString(), from: receipt.from, to: receipt.to,
+          gasUsed: receipt.gasUsed.toString(), from: receipt.from, to: receipt.to, chain: txctx.name,
         });
       } catch (_e) {
         // Not mined yet — check tx
         try {
-          var tx = await publicClient.getTransaction({ hash: body.hash });
-          return jsonRes(res, 200, { hash: body.hash, status: 'pending', from: tx.from, to: tx.to, value: tx.value.toString() });
+          var tx = await txctx.public.getTransaction({ hash: body.hash });
+          return jsonRes(res, 200, { hash: body.hash, status: 'pending', from: tx.from, to: tx.to, value: tx.value.toString(), chain: txctx.name });
         } catch (_e2) {
-          return jsonRes(res, 404, { error: 'Transaction not found on Base', hash: body.hash });
+          return jsonRes(res, 404, { error: 'Transaction not found on ' + txctx.chain.name, hash: body.hash });
         }
       }
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
@@ -425,15 +498,17 @@ async function handler(req, res) {
       var body = JSON.parse(await readBody(req));
       if (!body.address || !isAddress(body.address)) return jsonRes(res, 400, { error: 'address required' });
       if (!body.signature) return jsonRes(res, 400, { error: 'signature required (e.g. "function balanceOf(address) view returns (uint256)")' });
+      var crctx = chainCtxOr400(res, body.chain);
+      if (!crctx) return;
       var sig = body.signature.trim();
       if (sig.indexOf('function ') !== 0) sig = 'function ' + sig;
       var abi = [parseAbiItem(sig)];
       var fnName = abi[0].name;
       var args = body.args || [];
-      var result = await publicClient.readContract({ address: body.address, abi: abi, functionName: fnName, args: args });
+      var result = await crctx.public.readContract({ address: body.address, abi: abi, functionName: fnName, args: args });
       // Serialize BigInts
       var serialized = JSON.parse(JSON.stringify(result, function(_k, v) { return typeof v === 'bigint' ? v.toString() : v; }));
-      return jsonRes(res, 200, { address: body.address, function: fnName, args: args, result: serialized });
+      return jsonRes(res, 200, { address: body.address, function: fnName, args: args, result: serialized, chain: crctx.name });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
@@ -447,13 +522,15 @@ async function handler(req, res) {
       var abi2 = [parseAbiItem(sig2)];
       var fnName2 = abi2[0].name;
       var args2 = body.args || [];
+      var cwctx = chainCtxOr400(res, body.chain);
+      if (!cwctx) return;
       var value = body.value ? BigInt(Math.floor(Number(body.value) * 1e18)) : 0n;
-      var ethBal2 = await getEthBalanceWei();
+      var ethBal2 = await getEthBalanceWei(cwctx);
       if (ethBal2 < value) return jsonRes(res, 400, { error: 'Insufficient ETH for value + gas', have: formatUnits(ethBal2, 18) });
       var data2 = encodeFunctionData({ abi: abi2, functionName: fnName2, args: args2 });
-      var txHash2 = await walletClient.sendTransaction({ to: body.address, data: data2, value: value });
-      logTx({ type: 'contract-write', address: body.address, function: fnName2, args: args2, value: body.value || '0', hash: txHash2, status: 'submitted' });
-      return jsonRes(res, 200, { success: true, hash: txHash2, address: body.address, function: fnName2 });
+      var txHash2 = await cwctx.wallet.sendTransaction({ to: body.address, data: data2, value: value });
+      logTx({ type: 'contract-write', chain: cwctx.name, address: body.address, function: fnName2, args: args2, value: body.value || '0', hash: txHash2, status: 'submitted' });
+      return jsonRes(res, 200, { success: true, hash: txHash2, address: body.address, function: fnName2, chain: cwctx.name });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
@@ -473,11 +550,13 @@ async function handler(req, res) {
   if (req.url === '/gas-estimate' && req.method === 'POST') {
     try {
       var body = JSON.parse(await readBody(req));
-      var gasPrice = await publicClient.getGasPrice();
+      var gctx = chainCtxOr400(res, body.chain);
+      if (!gctx) return;
+      var gasPrice = await gctx.public.getGasPrice();
       var estGas = 21000n;
       if (body.address || body.data) {
         try {
-          estGas = await publicClient.estimateGas({
+          estGas = await gctx.public.estimateGas({
             account: account.address,
             to: body.address || body.to,
             data: body.data,
@@ -491,7 +570,7 @@ async function handler(req, res) {
         gasPriceGwei: (Number(gasPrice) / 1e9).toFixed(4),
         estimatedGas: estGas.toString(),
         estimatedCostEth: ethCost.toFixed(8),
-        chain: 'base',
+        chain: gctx.name,
       });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
@@ -515,7 +594,9 @@ async function handler(req, res) {
   if (req.url === '/sign' && req.method === 'POST') {
     try {
       var body = JSON.parse(await readBody(req));
-      var hdrs = await erc8128Sign(body.url, body.method || 'GET', body.body || '');
+      var sctx = chainCtxOr400(res, body.chain);
+      if (!sctx) return;
+      var hdrs = await erc8128Sign(body.url, body.method || 'GET', body.body || '', sctx.chain.id);
       return jsonRes(res, 200, { headers: hdrs });
     } catch(e) { return jsonRes(res, 500, { error: e.message }); }
   }
@@ -524,9 +605,11 @@ async function handler(req, res) {
     try {
       var body = JSON.parse(await readBody(req));
       var method = body.method || 'GET';
+      var fctx = chainCtxOr400(res, body.chain);
+      if (!fctx) return;
       var headers = Object.assign({}, body.headers || {});
       // Add ERC-8128 signature headers
-      var sigHeaders = await erc8128Sign(body.url, method, body.body || '');
+      var sigHeaders = await erc8128Sign(body.url, method, body.body || '', fctx.chain.id);
       Object.assign(headers, sigHeaders);
       var init = { method: method, headers: headers };
       if (body.body) init.body = body.body;
@@ -563,11 +646,13 @@ async function handler(req, res) {
       var body = JSON.parse(await readBody(req));
       if (!body.token || !isAddress(body.token)) return jsonRes(res, 400, { error: 'token (ERC-20 contract address) required' });
       if (!body.spender || !isAddress(body.spender)) return jsonRes(res, 400, { error: 'spender address required' });
+      var actx = chainCtxOr400(res, body.chain);
+      if (!actx) return;
       var allowanceAbi = [{ name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }];
-      var raw = await publicClient.readContract({ address: body.token, abi: allowanceAbi, functionName: 'allowance', args: [account.address, body.spender] });
+      var raw = await actx.public.readContract({ address: body.token, abi: allowanceAbi, functionName: 'allowance', args: [account.address, body.spender] });
       var decimals = 18; var symbol = '';
-      try { decimals = Number(await publicClient.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
-      try { symbol = String(await publicClient.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
+      try { decimals = Number(await actx.public.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
+      try { symbol = String(await actx.public.readContract({ address: body.token, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
       return jsonRes(res, 200, { token: body.token, symbol: symbol, spender: body.spender, allowance: formatUnits(raw, decimals), raw: raw.toString(), owner: account.address });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
@@ -577,18 +662,24 @@ async function handler(req, res) {
       var body = JSON.parse(await readBody(req));
       if (!body.token || !isAddress(body.token)) return jsonRes(res, 400, { error: 'token (ERC-20 contract address) required' });
       if (!body.spender || !isAddress(body.spender)) return jsonRes(res, 400, { error: 'spender address required' });
+      var rctx = chainCtxOr400(res, body.chain);
+      if (!rctx) return;
       var revokeAbi = [{ name: 'approve', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] }];
       var data = encodeFunctionData({ abi: revokeAbi, functionName: 'approve', args: [body.spender, 0n] });
-      var txHash = await walletClient.sendTransaction({ to: body.token, data: data });
-      logTx({ type: 'token-revoke', token: body.token, spender: body.spender, hash: txHash, status: 'submitted' });
-      return jsonRes(res, 200, { success: true, hash: txHash, token: body.token, spender: body.spender });
+      var txHash = await rctx.wallet.sendTransaction({ to: body.token, data: data });
+      logTx({ type: 'token-revoke', chain: rctx.name, token: body.token, spender: body.spender, hash: txHash, status: 'submitted' });
+      return jsonRes(res, 200, { success: true, hash: txHash, token: body.token, spender: body.spender, chain: rctx.name });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
-  if (req.url === '/wallet-summary') {
+  if (req.url === '/wallet-summary' || req.url.indexOf('/wallet-summary?') === 0) {
     try {
-      var ethBal = await getEthBalanceWei();
-      var usdcBal = await getUsdcBalanceRaw();
+      var wqs = req.url.indexOf('?') > -1 ? req.url.split('?')[1] : '';
+      var wqm = /chain=([a-z0-9-]+)/.exec(wqs);
+      var wctx = chainCtxOr400(res, wqm ? wqm[1] : null);
+      if (!wctx) return;
+      var ethBal = await getEthBalanceWei(wctx);
+      var usdcBal = await getUsdcBalanceRaw(wctx);
       var todaySpent = getTodaySpentUsdc();
       // Recent 5 transactions
       var recent = [];
@@ -616,7 +707,7 @@ async function handler(req, res) {
                 if (!seenSpenders[spender]) {
                   seenSpenders[spender] = true;
                   try {
-                    var allowance = await publicClient.readContract({ address: e.address, abi: allowanceAbi, functionName: 'allowance', args: [account.address, spender] });
+                    var allowance = await wctx.public.readContract({ address: e.address, abi: allowanceAbi, functionName: 'allowance', args: [account.address, spender] });
                     if (allowance > 0n) approvals.push({ token: e.address, spender: spender, allowance: allowance.toString() });
                   } catch (_e2) {}
                 }
@@ -626,7 +717,7 @@ async function handler(req, res) {
         }
       } catch (_e) {}
       return jsonRes(res, 200, {
-        address: account.address, chain: 'base', chainId: 8453,
+        address: account.address, chain: wctx.name, chainId: wctx.chain.id,
         balances: { eth: formatUnits(ethBal, 18), usdc: formatUnits(usdcBal, 6) },
         spending: { todaySpentUsdc: todaySpent.toFixed(2), dailyCap: DAILY_CAP_USDC || null },
         approvals: approvals,
@@ -676,12 +767,14 @@ async function handler(req, res) {
       var body = JSON.parse(await readBody(req));
       if (!body.address || !isAddress(body.address)) return jsonRes(res, 400, { error: 'address required' });
       if (!body.event) return jsonRes(res, 400, { error: 'event signature required (e.g. "event Transfer(address indexed from, address indexed to, uint256 value)")' });
+      var ectx = chainCtxOr400(res, body.chain);
+      if (!ectx) return;
       var evtSig = body.event.trim();
       if (evtSig.indexOf('event ') !== 0) evtSig = 'event ' + evtSig;
       var fromBlock = body.fromBlock ? BigInt(body.fromBlock) : 0n;
-      var toBlock = body.toBlock ? BigInt(body.toBlock) : await publicClient.getBlockNumber();
+      var toBlock = body.toBlock ? BigInt(body.toBlock) : await ectx.public.getBlockNumber();
       var evtAbi = [parseAbiItem(evtSig)];
-      var logs = await publicClient.getLogs({
+      var logs = await ectx.public.getLogs({
         address: body.address,
         event: evtAbi[0],
         fromBlock: fromBlock,
@@ -703,20 +796,27 @@ async function handler(req, res) {
   if (req.url === '/token-price' && req.method === 'POST') {
     try {
       var body = JSON.parse(await readBody(req));
-      // Known Chainlink price feeds on Base
+      var pctx = chainCtxOr400(res, body.chain);
+      if (!pctx) return;
+      // Known Chainlink price feeds on Base mainnet (lowercase — viem rejects bad checksums)
       var FEEDS = {
-        'eth': '0x71041dddad3595F9CEd3DcCBe3D6178aAe8f09C2',
-        'usdc': '0x7e860098F58bBFC8648a4311b374B1D669a2bc6B',
-        'usdt': '0xf19d560eB8d2ADf07BD6D13ed03e1D11215721F9',
-        'weth': '0x71041dddad3595F9CEd3DcCBe3D6178aAe8f09C2',
-        'dai': '0x591e79239a7d679378eC8c847e5038150364C78F',
+        'eth': '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70',
+        'usdc': '0x7e860098f58bbfc8648a4311b374b1d669a2bc6b',
+        'usdt': '0xf19d560eb8d2adf07bd6d13ed03e1d11215721f9',
+        'weth': '0x71041dddad3595f9ced3dccfbe3d1f4b0a16bb70',
+        'dai': '0x591e79239a7d679378ec8c847e5038150364c78f',
       };
       var feedAddr = body.feed || FEEDS[(body.token || 'eth').toLowerCase()];
       if (!feedAddr) return jsonRes(res, 400, { error: 'Unknown token. Provide a Chainlink feed address or use: eth, usdc, usdt, weth, dai' });
+      if (!body.feed && pctx.name !== 'base') {
+        return jsonRes(res, 400, { error: 'Named feeds are configured for Base mainnet only. On ' + pctx.name + ', pass an explicit Chainlink feed address via "feed". Robinhood Chain stock-token feeds: https://docs.robinhood.com/chain' });
+      }
       var feedAbi = [parseAbiItem('function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)')];
-      var data = await publicClient.readContract({ address: feedAddr, abi: feedAbi, functionName: 'latestRoundData' });
-      var price = Number(data.answer) / 1e8;
-      return jsonRes(res, 200, { token: body.token || 'eth', price: price, decimals: 8, feed: feedAddr, updatedAt: data.updatedAt.toString() });
+      var data = await pctx.public.readContract({ address: feedAddr, abi: feedAbi, functionName: 'latestRoundData' });
+      var answer = data.answer !== undefined ? data.answer : data[1];
+      var updatedAt = data.updatedAt !== undefined ? data.updatedAt : data[3];
+      var price = Number(answer) / 1e8;
+      return jsonRes(res, 200, { token: body.token || 'eth', price: price, decimals: 8, feed: feedAddr, chain: pctx.name, updatedAt: String(updatedAt) });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
@@ -742,6 +842,41 @@ async function handler(req, res) {
       // Default: list all
       return jsonRes(res, 200, { labels: book, count: Object.keys(book).length });
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  // Send a raw transaction (for LI.FI bridge/swap transactionRequests)
+  if (req.url === '/send-raw-tx' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      if (!body.to) return jsonRes(res, 400, { error: 'to address required' });
+      var clients = getBridgeClients(body.chainId || 8453);
+      var txParams = { to: body.to, account: account };
+      if (body.data) txParams.data = body.data;
+      if (body.value) txParams.value = BigInt(body.value);
+      if (body.gasLimit) txParams.gas = BigInt(body.gasLimit);
+      var txHash = await clients.wc.sendTransaction(txParams);
+      logTx({ type: 'raw-tx', chainId: body.chainId || 8453, to: body.to, hash: txHash, status: 'submitted' });
+      var receipt = await clients.pc.waitForTransactionReceipt({ hash: txHash, timeout: 60000 });
+      return jsonRes(res, 200, { success: true, hash: txHash, status: receipt.status });
+    } catch(e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  // Approve ERC20 token spending (for LI.FI allowance)
+  if (req.url === '/approve-token' && req.method === 'POST') {
+    try {
+      var body = JSON.parse(await readBody(req));
+      if (!body.token || !body.spender) return jsonRes(res, 400, { error: 'token and spender required' });
+      var clients = getBridgeClients(body.chainId || 8453);
+      var amt = body.amount ? BigInt(body.amount) : BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+      var data = encodeFunctionData({
+        abi: [{ name: 'approve', type: 'function', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] }],
+        functionName: 'approve', args: [body.spender, amt],
+      });
+      var txHash = await clients.wc.sendTransaction({ to: body.token, data: data });
+      logTx({ type: 'approve', chainId: body.chainId || 8453, token: body.token, spender: body.spender, hash: txHash, status: 'submitted' });
+      var receipt = await clients.pc.waitForTransactionReceipt({ hash: txHash, timeout: 30000 });
+      return jsonRes(res, 200, { success: true, hash: txHash, status: receipt.status });
+    } catch(e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
   // ── Clawtrl Private Payments (px402 ZK) ────────────────────────────────

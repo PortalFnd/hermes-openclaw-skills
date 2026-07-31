@@ -6,10 +6,13 @@
 ADDR="$1"
 SIG="$2"
 ARGS="${3:-[]}"
+CHAIN="${4:-${WALLET_CHAIN:-}}"
 if [ -z "$ADDR" ] || [ -z "$SIG" ]; then
-  echo '{"error":"Usage: contract-read <address> <signature> [json_args_array]","example":"contract-read 0xUSDC \"balanceOf(address) view returns (uint256)\" \"[\\\"0xabc...\\\"]\""}'
+  echo '{"error":"Usage: contract-read <address> <signature> [json_args_array] [chain]","example":"contract-read 0xUSDC \"balanceOf(address) view returns (uint256)\" \"[\\\"0xabc...\\\"]\" robinhood"}'
   exit 1
 fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
 curl -sf -X POST http://127.0.0.1:8128/contract-read \
   -H 'Content-Type: application/json' \
-  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"args\":$ARGS}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"args\":$ARGS$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

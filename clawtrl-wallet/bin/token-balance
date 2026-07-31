@@ -3,10 +3,13 @@
 # Usage: token-balance <token_contract_address>
 # Example: token-balance 0x4200000000000000000000000000000000000006   (WETH on Base)
 TOKEN="$1"
+CHAIN="${2:-${WALLET_CHAIN:-}}"
 if [ -z "$TOKEN" ]; then
-  echo '{"error":"Usage: token-balance <token_contract_address>","hint":"Use wallet-balance for ETH and USDC. Use this for any other ERC-20 token."}'
+  echo '{"error":"Usage: token-balance <token_contract_address> [chain]","hint":"Use wallet-balance for ETH and USDC. Chains: base (default) | base-sepolia | robinhood | robinhood-testnet"}'
   exit 1
 fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
 curl -sf -X POST http://127.0.0.1:8128/token-balance \
   -H 'Content-Type: application/json' \
-  -d "{\"token\":\"$TOKEN\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+  -d "{\"token\":\"$TOKEN\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

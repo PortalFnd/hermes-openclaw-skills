@@ -1,3 +1,7 @@
 #!/bin/bash
-# Check agent wallet balances (ETH and USDC on Base)
-curl -sf http://127.0.0.1:8128/balance 2>/dev/null || echo '{"error":"signing proxy not running"}'
+# Check agent wallet balances (ETH and USDC). Multi-chain: Base (default) + Robinhood Chain.
+# Usage: wallet-balance [chain]   — chains: base | base-sepolia | robinhood | robinhood-testnet
+CHAIN="${1:-${WALLET_CHAIN:-}}"
+QS=""
+if [ -n "$CHAIN" ]; then QS="?chain=$CHAIN"; fi
+curl -sf "http://127.0.0.1:8128/balance$QS" 2>/dev/null || echo '{"error":"signing proxy not running"}'

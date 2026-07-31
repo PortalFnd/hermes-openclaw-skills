@@ -8,10 +8,13 @@ ADDR="$1"
 SIG="$2"
 ARGS="${3:-[]}"
 VALUE="${4:-0}"
+CHAIN="${5:-${WALLET_CHAIN:-}}"
 if [ -z "$ADDR" ] || [ -z "$SIG" ]; then
-  echo '{"error":"Usage: contract-write <address> <signature> [json_args_array] [eth_value]","example":"contract-write 0xUSDC \"approve(address,uint256)\" \"[\\\"0xspender\\\",\\\"1000000\\\"]\""}'
+  echo '{"error":"Usage: contract-write <address> <signature> [json_args_array] [eth_value] [chain]","example":"contract-write 0xUSDC \"approve(address,uint256)\" \"[\\\"0xspender\\\",\\\"1000000\\\"]\" 0 robinhood"}'
   exit 1
 fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
 curl -sf -X POST http://127.0.0.1:8128/contract-write \
   -H 'Content-Type: application/json' \
-  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"args\":$ARGS,\"value\":\"$VALUE\"}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
+  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"args\":$ARGS,\"value\":\"$VALUE\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'
