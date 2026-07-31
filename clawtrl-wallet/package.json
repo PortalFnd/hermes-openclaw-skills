@@ -1,6 +1,6 @@
 {
   "name": "clawtrl-wallet",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Multi-chain crypto wallet (Base + Robinhood Chain) with ERC-8128 signing, x402 autonomous payments, private (ZK) x402 payments, and transfers. Compatible with OpenClaw and Hermes agents.",
   "type": "module",
   "dependencies": {
