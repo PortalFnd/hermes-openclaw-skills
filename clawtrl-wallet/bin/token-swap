@@ -1,0 +1,28 @@
+#!/bin/bash
+# token-swap — Swap tokens via Uniswap v3 (quote -> approve -> execute, exact input)
+# Usage: token-swap <amount> <tokenIn> <tokenOut> [chain] [--quote]
+#   Tokens: symbol (eth, weth, usdg, tsla, nvda...) or 0x contract address.
+#   Stock symbols resolve via the verified Robinhood token registry only.
+# Examples:
+#   token-swap 10 usdg tsla robinhood            # buy ~$10 of TSLA stock token
+#   token-swap 0.01 eth tsla robinhood --quote   # quote only, no execution
+#   token-swap 0.5 tsla usdg robinhood           # sell half a TSLA token
+AMOUNT="$1"
+TOKEN_IN="$2"
+TOKEN_OUT="$3"
+CHAIN="$4"
+QUOTE="$5"
+# Support --quote in 4th position when chain comes from WALLET_CHAIN env
+if [ "$CHAIN" = "--quote" ]; then QUOTE="--quote"; CHAIN=""; fi
+CHAIN="${CHAIN:-${WALLET_CHAIN:-}}"
+if [ -z "$AMOUNT" ] || [ -z "$TOKEN_IN" ] || [ -z "$TOKEN_OUT" ]; then
+  echo '{"error":"Usage: token-swap <amount> <tokenIn> <tokenOut> [chain] [--quote]","hint":"Swaps run on Uniswap v3. Chains: robinhood (default chain is base — pass robinhood). Stock symbols resolve via the verified Robinhood registry."}'
+  exit 1
+fi
+EXTRA=""
+if [ -n "$CHAIN" ]; then EXTRA=",\"chain\":\"$CHAIN\""; fi
+if [ "$QUOTE" = "--quote" ]; then EXTRA="$EXTRA,\"quoteOnly\":true"; fi
+if [ -n "$WALLET_SLIPPAGE_BPS" ]; then EXTRA="$EXTRA,\"slippageBps\":$WALLET_SLIPPAGE_BPS"; fi
+curl -sf -X POST http://127.0.0.1:8128/swap \
+  -H 'Content-Type: application/json' \
+  -d "{\"tokenIn\":\"$TOKEN_IN\",\"tokenOut\":\"$TOKEN_OUT\",\"amount\":\"$AMOUNT\"$EXTRA}" 2>/dev/null || echo '{"error":"signing proxy not running"}'

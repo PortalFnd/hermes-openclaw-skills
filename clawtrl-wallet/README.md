@@ -48,6 +48,7 @@ contract-read 0x<token> "symbol() view returns (string)" '[]' robinhood
 | `token-allowance <token> <spender> [chain]` | Check token spending allowance |
 | `token-revoke <token> <spender> [chain]` | Revoke token spending allowance |
 | `token-price <symbol\|address> [feed] [chain]` | Chainlink price feeds (named feeds on Base; pass a feed address on other chains) |
+| `token-swap <amount> <tokenIn> <tokenOut> [chain] [--quote]` | Uniswap v3 swaps on Robinhood Chain (quote → approve → execute). Verified stock-token resolution; spoofed tickers refused. USDG is the dollar token (no real USDC on this chain) |
 | `tx-status <hash> [chain]` | Check if a transaction succeeded, reverted, or is pending |
 | `contract-read <address> <sig> [args] [chain]` | Call any view function on any contract |
 | `contract-write <address> <sig> [args] [value] [chain]` | Send a transaction to any contract |

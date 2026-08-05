@@ -116,7 +116,7 @@ npm install --production 2>&1 | tail -3 || {
 
 # Install shell tools
 echo "[4/6] Installing shell tools..."
-TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll token-balance tx-status contract-read contract-write ens-resolve gas-estimate wallet-tx-log token-allowance token-revoke wallet-summary wallet-stats contract-events token-price wallet-label private-status private-balance private-deposit private-pay private-fetch"
+TOOLS="wallet-info wallet-balance signed-fetch crypto-send erc8128-sign paytoll token-balance tx-status contract-read contract-write ens-resolve gas-estimate wallet-tx-log token-allowance token-revoke wallet-summary wallet-stats contract-events token-price wallet-label token-swap private-status private-balance private-deposit private-pay private-fetch"
 for tool in $TOOLS; do
   if [ -n "$SKILL_DIR" ]; then
     cp "$SKILL_DIR/bin/$tool" "$TOOLS_DIR/$tool"
@@ -267,6 +267,7 @@ echo "    wallet-stats     — spending analytics from transaction history"
 echo "    contract-events  — query past events from any contract"
 echo "    token-price      — USD price via Chainlink (ETH, USDC, DAI, etc.)"
 echo "    wallet-label     — label addresses for human-readable references"
+echo "    token-swap       — Uniswap v3 swaps on Robinhood Chain (quote -> approve -> execute)"
 echo "  -- Private payments (opt-in: CLAWTRL_PRIVACY_ENABLED=true) --"
 echo "    private-status   — privacy on/off + shielded balance"
 echo "    private-balance  — shielded (private) USDC balance"

@@ -19,6 +19,7 @@ Gives your OpenClaw or Hermes agent a native Ethereum wallet that works on **Bas
 - **Wallet Summary & Stats** — One-command overview of balances, spending, approvals, and analytics
 - **Contract Events** — Query past event logs from any smart contract on Base
 - **Token Prices** — Live USD prices via Chainlink oracles (ETH, USDC, DAI, etc.)
+- **Token Swaps** — Uniswap v3 swaps on Robinhood Chain (quote → approve → execute) with verified stock-token resolution and spoofed-token protection
 - **Address Book** — Label addresses for human-readable references
 - **Spending Caps** — Optional WALLET_DAILY_CAP_USDC env var enforces a hard daily spending limit
 - **Private Payments (opt-in)** — Shield USDC into a zero-knowledge note and pay merchants / x402 APIs from a fresh burner wallet so payments are unlinkable to your public wallet. Disabled by default; enable with `CLAWTRL_PRIVACY_ENABLED=true`
@@ -204,6 +205,24 @@ wallet-label resolve <label>
 wallet-label
 ```
 
+### token-swap
+Swap tokens via Uniswap v3 on Robinhood Chain — quote → approve → execute in one call. `amount` is the exact input. Prefer `--quote` first to preview the route and output.
+```
+token-swap <amount> <tokenIn> <tokenOut> [chain] [--quote]
+```
+Tokens can be symbols (`eth`, `weth`, `usdg`, `tsla`, `nvda`, `aapl`…) or raw `0x` contract addresses. Stock-token symbols are resolved through the verified Robinhood token registry at runtime — symbol-only matches to unverified/spoofed tokens are **refused** (ticker collisions are rampant on this chain: dozens of fake TSLA/USDC tokens exist). `eth`↔`weth` wraps/unwraps directly without the router.
+
+**Examples:**
+```
+token-swap 10 usdg tsla robinhood --quote    # preview buying $10 of TSLA stock token
+token-swap 10 usdg tsla robinhood            # execute
+token-swap 0.005 eth nvda robinhood          # buy NVDA with native ETH
+token-swap 0.05 tsla usdg robinhood          # sell stock token for USDG
+token-swap 0.01 eth weth robinhood           # wrap ETH
+```
+
+**Important:** there is **no canonical USDC/USDT on Robinhood Chain** — the dollar token is **USDG** (Robinhood, 6 decimals). `usdc`/`usdt` inputs are refused with a hint, because every token with those tickers on this chain is a spoof. Slippage defaults to 0.5% (`WALLET_SLIPPAGE_BPS` to override, max 50%). Approvals are scoped to the exact swap amount. Raw address inputs trade with a loud `verified: false` warning — confirm the contract before trading size. Stock Tokens are jurisdiction-restricted (Reg S) — see the Chains section.
+
 ## Private Payments (opt-in)
 
 The wallet bundles a **vendored, in-tree zero-knowledge payment engine** (a fork of
@@ -291,6 +310,7 @@ clawtrl-wallet/
     ├── contract-events             # Query past events from any contract
     ├── token-price                 # USD price via Chainlink oracles
     ├── wallet-label                # Address book for human-readable labels
+    ├── token-swap                  # Uniswap v3 swap (quote → approve → execute) on Robinhood Chain
     ├── private-status              # Privacy on/off + shielded balance
     ├── private-balance             # Shielded (private) USDC balance
     ├── private-deposit             # Shield USDC into the privacy pool
@@ -318,6 +338,8 @@ Unless the user gives a different budget, follow these defaults when acting auto
 - Confirm `wallet-balance` before every transaction
 - For payments above 0.50 USDC, ask the user first
 - For any `contract-write` on an unknown contract, ask the user first
+- Run `token-swap ... --quote` before executing any swap, and confirm the route + expected output with the user for anything above dust size
+- Never trade raw `0x` addresses that resolve with `verified: false` without explicit user confirmation
 - Never approve unlimited (`max uint256`) allowances unless the user explicitly requests it; prefer scoped approvals
 - Use `gas-estimate` before any large or unfamiliar transaction
 - Read the recent `wallet-tx-log` at the start of a task so you have context on what you have already spent

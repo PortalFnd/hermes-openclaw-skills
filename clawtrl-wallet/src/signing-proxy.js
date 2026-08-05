@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
-import { createWalletClient, createPublicClient, http, parseUnits, formatUnits, encodeFunctionData, parseAbiItem, isAddress, namehash, defineChain } from 'viem';
+import { createWalletClient, createPublicClient, http, parseUnits, formatUnits, encodeFunctionData, encodePacked, parseAbiItem, isAddress, namehash, defineChain } from 'viem';
 import { base, baseSepolia, mainnet, arbitrum, optimism, polygon, bsc, avalanche } from 'viem/chains';
 
 // Robinhood Chain — Arbitrum Orbit L2, ETH gas, EVM-compatible
@@ -260,6 +260,179 @@ async function getTokenBalanceRaw(ctx, tokenAddress) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Uniswap v3 swaps (Robinhood Chain).
+// Router/quoter/factory/WETH/USDG addresses are from the official Uniswap v3
+// Robinhood Chain deployment docs, cross-checked on-chain (router.factory(),
+// router.WETH9(), pool token0/token1). Stock-token symbols are resolved at
+// runtime via the Blockscout explorer and MUST carry Robinhood verification
+// signals (official "Robinhood Token" name, robinhood CDN icon, or explorer
+// admin verification). Ticker collisions and spoofed pools are common on
+// this chain — never resolve a token by liquidity or by symbol alone.
+// ─────────────────────────────────────────────────────────────────────────
+var UNISWAP_V3 = {
+  robinhood: {
+    factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa',
+    router: '0xcaf681a66d020601342297493863e78c959e5cb2',
+    quoter: '0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7',
+    weth: '0x0bd7d308f8e1639fab988df18a8011f41eacad73',
+    usdg: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    explorerSearch: 'https://robinhoodchain.blockscout.com/api/v2/search?q=',
+    explorerTx: 'https://robinhoodchain.blockscout.com/tx/',
+  },
+};
+var UNI_FEE_TIERS = [100, 500, 3000, 10000];
+var UNI_MULTIHOP_TIERS = [100, 500, 3000];
+
+var QUOTER_V2_ABI = [
+  { name: 'quoteExactInputSingle', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'params', type: 'tuple', components: [
+      { name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' },
+      { name: 'amountIn', type: 'uint256' }, { name: 'fee', type: 'uint24' },
+      { name: 'sqrtPriceLimitX96', type: 'uint160' }] }],
+    outputs: [{ name: 'amountOut', type: 'uint256' }, { name: 'sqrtPriceX96AfterList', type: 'uint160[]' }, { name: 'initializedTicksCrossedList', type: 'uint32[]' }, { name: 'gasEstimate', type: 'uint256' }] },
+  { name: 'quoteExactInput', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'path', type: 'bytes' }, { name: 'amountIn', type: 'uint256' }],
+    outputs: [{ name: 'amountOut', type: 'uint256' }, { name: 'sqrtPriceX96AfterList', type: 'uint160[]' }, { name: 'initializedTicksCrossedList', type: 'uint32[]' }, { name: 'gasEstimate', type: 'uint256' }] },
+];
+var SWAP_ROUTER_ABI = [
+  { name: 'exactInputSingle', type: 'function', stateMutability: 'payable',
+    inputs: [{ name: 'params', type: 'tuple', components: [
+      { name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' },
+      { name: 'fee', type: 'uint24' }, { name: 'recipient', type: 'address' },
+      { name: 'amountIn', type: 'uint256' }, { name: 'amountOutMinimum', type: 'uint256' },
+      { name: 'sqrtPriceLimitX96', type: 'uint160' }] }],
+    outputs: [{ name: 'amountOut', type: 'uint256' }] },
+  { name: 'exactInput', type: 'function', stateMutability: 'payable',
+    inputs: [{ name: 'params', type: 'tuple', components: [
+      { name: 'path', type: 'bytes' }, { name: 'recipient', type: 'address' },
+      { name: 'amountIn', type: 'uint256' }, { name: 'amountOutMinimum', type: 'uint256' }] }],
+    outputs: [{ name: 'amountOut', type: 'uint256' }] },
+  { name: 'multicall', type: 'function', stateMutability: 'payable',
+    inputs: [{ name: 'data', type: 'bytes[]' }], outputs: [{ name: 'results', type: 'bytes[]' }] },
+  { name: 'unwrapWETH9', type: 'function', stateMutability: 'payable',
+    inputs: [{ name: 'amountMinimum', type: 'uint256' }, { name: 'recipient', type: 'address' }], outputs: [] },
+];
+var WETH_ABI = [
+  { name: 'deposit', type: 'function', stateMutability: 'payable', inputs: [], outputs: [] },
+  { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'wad', type: 'uint256' }], outputs: [] },
+];
+var ERC20_SPEND_ABI = [
+  { name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'approve', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] },
+];
+
+// Token symbol -> contract resolution (cached; negative results cached briefly)
+var _tokenResolveCache = {};
+var TOKEN_CACHE_TTL_MS = 60 * 60 * 1000;
+var TOKEN_NEG_CACHE_TTL_MS = 60 * 1000;
+
+async function resolveSwapToken(ctx, rawInput) {
+  var cfg = UNISWAP_V3[ctx.name];
+  if (!cfg) return { error: 'Swaps are not configured on ' + ctx.name, supported: Object.keys(UNISWAP_V3) };
+  var input = String(rawInput || '').trim();
+  if (!input) return { error: 'token symbol or address required' };
+  var lower = input.toLowerCase();
+  if (lower === 'eth') return { address: cfg.weth, symbol: 'ETH', decimals: 18, native: true, verified: true };
+  if (lower === 'weth') return { address: cfg.weth, symbol: 'WETH', decimals: 18, verified: true };
+  if (lower === 'usdg') return { address: cfg.usdg, symbol: 'USDG', decimals: 6, verified: true };
+  if (lower === 'usdc' || lower === 'usdt') return {
+    error: 'There is no canonical ' + input.toUpperCase() + ' on Robinhood Chain — every token with that ticker here is unverified/spoofed.',
+    hint: 'The dollar token on this chain is USDG (Robinhood, 6 decimals). Use "usdg".',
+  };
+  if (isAddress(input)) {
+    var sym = ''; var dec = 18;
+    try { sym = String(await ctx.public.readContract({ address: input, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
+    try { dec = Number(await ctx.public.readContract({ address: input, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
+    return { address: input.toLowerCase(), symbol: sym || input, decimals: dec, verified: false,
+      warning: 'Raw address input — NOT verified as an official Robinhood token. Ticker collisions are common on Robinhood Chain; confirm this contract before trading size.' };
+  }
+  var cacheKey = ctx.name + ':' + lower;
+  var hit = _tokenResolveCache[cacheKey];
+  var now = Date.now();
+  if (hit && (now - hit.t) < (hit.token ? TOKEN_CACHE_TTL_MS : TOKEN_NEG_CACHE_TTL_MS)) {
+    if (hit.token) return hit.token;
+    return { error: 'No verified Robinhood token found for symbol "' + input + '" (cached miss — retry in a minute or pass a 0x address)' };
+  }
+  var candidates = [];
+  try {
+    var resp = await globalThis.fetch(cfg.explorerSearch + encodeURIComponent(input), { signal: AbortSignal.timeout(8000) });
+    var data = await resp.json();
+    var items = (data && data.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.type !== 'token') continue;
+      if (String(it.symbol || '').toUpperCase() !== input.toUpperCase()) continue;
+      var verified = false;
+      if (it.icon_url && String(it.icon_url).indexOf('cdn.robinhood.com') > -1) verified = true;
+      if (/robinhood token/i.test(String(it.name || ''))) verified = true;
+      if (it.is_verified_via_admin_panel === true) verified = true;
+      candidates.push({ address: String(it.address_hash || '').toLowerCase(), name: it.name, symbol: it.symbol, verified: verified });
+    }
+  } catch (e) {
+    return { error: 'Token registry lookup failed: ' + e.message };
+  }
+  var pick = null;
+  for (var j = 0; j < candidates.length; j++) { if (candidates[j].verified) { pick = candidates[j]; break; } }
+  if (!pick) {
+    _tokenResolveCache[cacheKey] = { t: now, token: null };
+    return {
+      error: 'No VERIFIED Robinhood token found for symbol "' + input + '".',
+      hint: 'Ticker collisions are common on this chain and symbol-only matches are refused. If you know the exact contract, pass it as a 0x address instead.',
+      candidates: candidates.map(function(c) { return { address: c.address, name: c.name, symbol: c.symbol }; }).slice(0, 5),
+    };
+  }
+  var dec2 = 18; var sym2 = pick.symbol;
+  try { dec2 = Number(await ctx.public.readContract({ address: pick.address, abi: ERC20_ABI, functionName: 'decimals' })); } catch (_e) {}
+  try { sym2 = String(await ctx.public.readContract({ address: pick.address, abi: ERC20_ABI, functionName: 'symbol' })); } catch (_e) {}
+  var token = { address: pick.address, symbol: sym2, name: pick.name, decimals: dec2, verified: true, verifiedVia: 'blockscout-robinhood-signals' };
+  _tokenResolveCache[cacheKey] = { t: now, token: token };
+  return token;
+}
+
+// Best-route quote: single hop across all fee tiers, then two-hop via USDG / WETH.
+async function quoteBestRoute(ctx, cfg, tokenInAddr, tokenOutAddr, amountIn) {
+  var best = null;
+  for (var i = 0; i < UNI_FEE_TIERS.length; i++) {
+    var fee = UNI_FEE_TIERS[i];
+    try {
+      var q = await ctx.public.readContract({
+        address: cfg.quoter, abi: QUOTER_V2_ABI, functionName: 'quoteExactInputSingle',
+        args: [{ tokenIn: tokenInAddr, tokenOut: tokenOutAddr, amountIn: amountIn, fee: fee, sqrtPriceLimitX96: 0n }],
+      });
+      var amountOut = q.amountOut !== undefined ? q.amountOut : q[0];
+      if (amountOut > 0n && (!best || amountOut > best.amountOut)) {
+        best = { amountOut: amountOut, kind: 'single', fee: fee, gasEstimate: (q.gasEstimate !== undefined ? q.gasEstimate : q[3]) };
+      }
+    } catch (_e) { /* no pool at this tier */ }
+  }
+  if (best) return best;
+  var mids = [cfg.usdg, cfg.weth];
+  for (var m = 0; m < mids.length; m++) {
+    var mid = mids[m];
+    if (mid === tokenInAddr.toLowerCase() || mid === tokenOutAddr.toLowerCase()) continue;
+    for (var f1 = 0; f1 < UNI_MULTIHOP_TIERS.length; f1++) {
+      for (var f2 = 0; f2 < UNI_MULTIHOP_TIERS.length; f2++) {
+        try {
+          var path = encodePacked(
+            ['address', 'uint24', 'address', 'uint24', 'address'],
+            [tokenInAddr, UNI_MULTIHOP_TIERS[f1], mid, UNI_MULTIHOP_TIERS[f2], tokenOutAddr]
+          );
+          var q2 = await ctx.public.readContract({
+            address: cfg.quoter, abi: QUOTER_V2_ABI, functionName: 'quoteExactInput',
+            args: [path, amountIn],
+          });
+          var out2 = q2.amountOut !== undefined ? q2.amountOut : q2[0];
+          if (out2 > 0n && (!best || out2 > best.amountOut)) {
+            best = { amountOut: out2, kind: 'multi', path: path, fees: [UNI_MULTIHOP_TIERS[f1], UNI_MULTIHOP_TIERS[f2]], via: mid, gasEstimate: (q2.gasEstimate !== undefined ? q2.gasEstimate : q2[3]) };
+          }
+        } catch (_e2) { /* no route via this mid/tier combo */ }
+      }
+    }
+  }
+  return best;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Clawtrl Private Payments (vendored px402 ZK engine — see src/privacy/NOTICE.md)
 // Opt-in: only active when CLAWTRL_PRIVACY_ENABLED=true. Notes are stored
 // encrypted (AES-256-GCM) with a key derived from the agent wallet key.
@@ -367,7 +540,7 @@ async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   if (req.url === '/health') {
-    return jsonRes(res, 200, { status: 'ok', address: account.address, chain: DEFAULT_CHAIN_NAME, chainId: DEFAULT_CTX.chain.id, chains: Object.keys(CHAIN_REGISTRY), privacy: PRIVACY_ENABLED });
+    return jsonRes(res, 200, { status: 'ok', address: account.address, chain: DEFAULT_CHAIN_NAME, chainId: DEFAULT_CTX.chain.id, chains: Object.keys(CHAIN_REGISTRY), swapChains: Object.keys(UNISWAP_V3), privacy: PRIVACY_ENABLED });
   }
 
   if (req.url === '/identity') {
@@ -817,6 +990,124 @@ async function handler(req, res) {
       var updatedAt = data.updatedAt !== undefined ? data.updatedAt : data[3];
       var price = Number(answer) / 1e8;
       return jsonRes(res, 200, { token: body.token || 'eth', price: price, decimals: 8, feed: feedAddr, chain: pctx.name, updatedAt: String(updatedAt) });
+    } catch (e) { return jsonRes(res, 500, { error: e.message }); }
+  }
+
+  // Uniswap v3 swap: quote -> approve -> execute. Exact-input only.
+  // body: { tokenIn, tokenOut, amount, chain?, slippageBps?, quoteOnly? }
+  if (req.url === '/swap' && req.method === 'POST') {
+    try {
+      var swbody = JSON.parse(await readBody(req));
+      if (!swbody.tokenIn || !swbody.tokenOut || !swbody.amount) {
+        return jsonRes(res, 400, { error: 'tokenIn, tokenOut and amount required', example: { tokenIn: 'usdg', tokenOut: 'tsla', amount: '10', chain: 'robinhood' } });
+      }
+      var swctx = chainCtxOr400(res, swbody.chain);
+      if (!swctx) return;
+      var swcfg = UNISWAP_V3[swctx.name];
+      if (!swcfg) return jsonRes(res, 400, { error: 'Swaps are not configured on ' + swctx.name, supported: Object.keys(UNISWAP_V3) });
+      var tin = await resolveSwapToken(swctx, swbody.tokenIn);
+      if (tin.error) return jsonRes(res, 400, tin);
+      var tout = await resolveSwapToken(swctx, swbody.tokenOut);
+      if (tout.error) return jsonRes(res, 400, tout);
+      var slippageBps = swbody.slippageBps !== undefined ? Number(swbody.slippageBps) : 50;
+      if (!(slippageBps >= 1 && slippageBps <= 5000)) return jsonRes(res, 400, { error: 'slippageBps must be between 1 and 5000 (default 50 = 0.5%)' });
+      var amountIn;
+      try { amountIn = parseUnits(String(swbody.amount), tin.decimals); } catch (_e) { return jsonRes(res, 400, { error: 'Invalid amount "' + swbody.amount + '" for ' + tin.decimals + '-decimal token' }); }
+      if (amountIn <= 0n) return jsonRes(res, 400, { error: 'amount must be positive' });
+      var warnings = [];
+      if (tin.warning) warnings.push(tin.warning);
+      if (tout.warning) warnings.push(tout.warning);
+
+      // WETH wrap/unwrap shortcuts (eth <-> weth need no router)
+      var wantsWrap = tin.native && String(swbody.tokenOut).toLowerCase() === 'weth';
+      var wantsUnwrap = String(swbody.tokenIn).toLowerCase() === 'weth' && tout.native;
+      if (wantsWrap || wantsUnwrap) {
+        if (swbody.quoteOnly) {
+          return jsonRes(res, 200, { quoteOnly: true, chain: swctx.name, kind: wantsWrap ? 'wrap' : 'unwrap',
+            tokenIn: { symbol: tin.symbol, amount: String(swbody.amount) }, tokenOut: { symbol: tout.symbol, expectedOut: String(swbody.amount) }, warnings: warnings });
+        }
+        var wHash;
+        if (wantsWrap) {
+          var wEthBal = await getEthBalanceWei(swctx);
+          if (wEthBal < amountIn) return jsonRes(res, 400, { error: 'Insufficient ETH balance', have: formatUnits(wEthBal, 18), need: String(swbody.amount) });
+          wHash = await swctx.wallet.sendTransaction({ to: swcfg.weth, data: encodeFunctionData({ abi: WETH_ABI, functionName: 'deposit' }), value: amountIn });
+        } else {
+          var wBal = await getTokenBalanceRaw(swctx, swcfg.weth);
+          if (wBal < amountIn) return jsonRes(res, 400, { error: 'Insufficient WETH balance', have: formatUnits(wBal, 18), need: String(swbody.amount) });
+          wHash = await swctx.wallet.sendTransaction({ to: swcfg.weth, data: encodeFunctionData({ abi: WETH_ABI, functionName: 'withdraw', args: [amountIn] }) });
+        }
+        logTx({ type: wantsWrap ? 'wrap' : 'unwrap', chain: swctx.name, amount: String(swbody.amount), hash: wHash, status: 'submitted' });
+        var wReceipt = await swctx.public.waitForTransactionReceipt({ hash: wHash, timeout: 60000 });
+        return jsonRes(res, 200, { success: wReceipt.status === 'success', hash: wHash, status: wReceipt.status, kind: wantsWrap ? 'wrap' : 'unwrap',
+          tokenIn: { symbol: tin.symbol, amount: String(swbody.amount) }, tokenOut: { symbol: tout.symbol, amount: String(swbody.amount) },
+          explorer: swcfg.explorerTx + wHash, warnings: warnings });
+      }
+
+      if (tin.address === tout.address) return jsonRes(res, 400, { error: 'tokenIn and tokenOut resolve to the same token', address: tin.address });
+
+      var quote = await quoteBestRoute(swctx, swcfg, tin.address, tout.address, amountIn);
+      if (!quote) return jsonRes(res, 400, { error: 'No Uniswap v3 route found', tokenIn: tin.symbol, tokenOut: tout.symbol, hint: 'The pair may have no liquidity on the official v3 deployment. Try quoting the reverse direction or a smaller amount.' });
+      var minOut = quote.amountOut * BigInt(10000 - slippageBps) / 10000n;
+      var viaSymbol = quote.kind === 'multi' ? (quote.via === swcfg.usdg ? 'USDG' : 'WETH') : null;
+      var quoteOut = {
+        chain: swctx.name, router: swcfg.router,
+        tokenIn: { symbol: tin.symbol, address: tin.address, amount: String(swbody.amount), decimals: tin.decimals, verified: !!tin.verified },
+        tokenOut: { symbol: tout.symbol, address: tout.address, expectedOut: formatUnits(quote.amountOut, tout.decimals), decimals: tout.decimals, verified: !!tout.verified },
+        route: viaSymbol ? [tin.symbol, viaSymbol, tout.symbol] : [tin.symbol, tout.symbol],
+        fees: quote.kind === 'single' ? [quote.fee] : quote.fees,
+        slippageBps: slippageBps, minOut: formatUnits(minOut, tout.decimals),
+        gasEstimate: quote.gasEstimate !== undefined ? String(quote.gasEstimate) : undefined,
+        warnings: warnings,
+      };
+      if (swbody.quoteOnly) return jsonRes(res, 200, Object.assign({ quoteOnly: true }, quoteOut));
+
+      // Balance precheck + router approval (ERC-20 input only)
+      if (tin.native) {
+        var ethBalSw = await getEthBalanceWei(swctx);
+        if (ethBalSw < amountIn) return jsonRes(res, 400, { error: 'Insufficient ETH balance (need amount + gas)', have: formatUnits(ethBalSw, 18), need: String(swbody.amount) });
+      } else {
+        var balIn = await getTokenBalanceRaw(swctx, tin.address);
+        if (balIn < amountIn) return jsonRes(res, 400, { error: 'Insufficient ' + tin.symbol + ' balance', have: formatUnits(balIn, tin.decimals), need: String(swbody.amount) });
+        var curAllowance = await swctx.public.readContract({ address: tin.address, abi: ERC20_SPEND_ABI, functionName: 'allowance', args: [account.address, swcfg.router] });
+        if (curAllowance < amountIn) {
+          var approveHash = await swctx.wallet.sendTransaction({ to: tin.address, data: encodeFunctionData({ abi: ERC20_SPEND_ABI, functionName: 'approve', args: [swcfg.router, amountIn] }) });
+          logTx({ type: 'approve', chain: swctx.name, token: tin.address, spender: swcfg.router, amount: String(swbody.amount), hash: approveHash, status: 'submitted' });
+          var appReceipt = await swctx.public.waitForTransactionReceipt({ hash: approveHash, timeout: 30000 });
+          if (appReceipt.status !== 'success') return jsonRes(res, 500, { error: 'Router approval transaction failed', approvalHash: approveHash });
+          quoteOut.approvalHash = approveHash;
+        }
+      }
+
+      // Execute (native-out goes through multicall + unwrapWETH9)
+      var outBefore = tout.native ? await getEthBalanceWei(swctx) : await getTokenBalanceRaw(swctx, tout.address);
+      var swapRecipient = tout.native ? swcfg.router : account.address;
+      var swapCall;
+      if (quote.kind === 'single') {
+        swapCall = encodeFunctionData({ abi: SWAP_ROUTER_ABI, functionName: 'exactInputSingle', args: [{
+          tokenIn: tin.address, tokenOut: tout.address, fee: quote.fee, recipient: swapRecipient,
+          amountIn: amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0n,
+        }] });
+      } else {
+        swapCall = encodeFunctionData({ abi: SWAP_ROUTER_ABI, functionName: 'exactInput', args: [{
+          path: quote.path, recipient: swapRecipient, amountIn: amountIn, amountOutMinimum: minOut,
+        }] });
+      }
+      var swapData = swapCall;
+      if (tout.native) {
+        var unwrapCall = encodeFunctionData({ abi: SWAP_ROUTER_ABI, functionName: 'unwrapWETH9', args: [minOut, account.address] });
+        swapData = encodeFunctionData({ abi: SWAP_ROUTER_ABI, functionName: 'multicall', args: [[swapCall, unwrapCall]] });
+      }
+      var swapHash = await swctx.wallet.sendTransaction({ to: swcfg.router, data: swapData, value: tin.native ? amountIn : 0n });
+      logTx({ type: 'swap', chain: swctx.name, tokenIn: tin.symbol, tokenOut: tout.symbol, amountIn: String(swbody.amount), expectedOut: quoteOut.tokenOut.expectedOut, hash: swapHash, status: 'submitted' });
+      var swReceipt = await swctx.public.waitForTransactionReceipt({ hash: swapHash, timeout: 60000 });
+      var outAfter = tout.native ? await getEthBalanceWei(swctx) : await getTokenBalanceRaw(swctx, tout.address);
+      var actualOut = outAfter > outBefore ? outAfter - outBefore : 0n;
+      logTx({ type: 'swap', chain: swctx.name, tokenIn: tin.symbol, tokenOut: tout.symbol, amountIn: String(swbody.amount), actualOut: formatUnits(actualOut, tout.decimals), hash: swapHash, status: swReceipt.status });
+      return jsonRes(res, 200, Object.assign({
+        success: swReceipt.status === 'success', hash: swapHash, status: swReceipt.status,
+        actualOut: formatUnits(actualOut, tout.decimals), gasUsed: swReceipt.gasUsed.toString(),
+        explorer: swcfg.explorerTx + swapHash,
+      }, quoteOut));
     } catch (e) { return jsonRes(res, 500, { error: e.message }); }
   }
 
