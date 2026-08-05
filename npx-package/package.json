@@ -1,9 +1,25 @@
 {
   "name": "clawtrl-wallet",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Crypto wallet for AI agents on OpenClaw and Hermes — ERC-8128 signing, x402 payments, transfers on Base",
   "bin": {
     "clawtrl-wallet": "./cli.js"
+  },
+  "dependencies": {
+    "viem": "^2.39.0",
+    "@x402/fetch": "latest",
+    "@x402/evm": "latest",
+    "snarkjs": "^0.7.0",
+    "circomlibjs": "^0.1.7",
+    "graphql": "^16.12.0",
+    "graphql-request": "^7.3.4",
+    "ws": "^8.21.0",
+    "underscore": "^1.13.8"
+  },
+  "overrides": {
+    "ws": "^8.21.0",
+    "underscore": "^1.13.8",
+    "elliptic": "^6.6.1"
   },
   "keywords": [
     "ai-agent",
