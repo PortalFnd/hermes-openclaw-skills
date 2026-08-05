@@ -2,7 +2,7 @@
 name: clawtrl-wallet
 description: Multi-chain crypto wallet (Base + Robinhood Chain) with ERC-8128 signed HTTP requests, x402 autonomous payments, optional private (zero-knowledge) x402 payments, ERC-20 token reads, generic contract read/write, ENS resolution, and a persistent transaction log. Gives your agent a full on-chain identity and the ability to read and act on-chain safely.
 compatibility: Works with Clawtrl OpenClaw and Hermes agents. Requires Node.js 20+ and curl on the host. The signing proxy runs on 127.0.0.1:8128 and is shared by both runtimes.
-metadata: { "openclaw": { "emoji": "💎", "homepage": "https://clawtrl.com/skills", "requires": { "bins": ["curl", "node"] } } }
+metadata: { "openclaw": { "emoji": "💎", "homepage": "https://clawtrl.portalfoundation.ai/skills", "requires": { "bins": ["curl", "node"] } } }
 ---
 
 # Clawtrl Wallet
@@ -367,7 +367,7 @@ sudo ./install.sh
 ```
 
 ### Option 3: Pre-installed (Clawtrl hosted agents)
-If you deploy via [clawtrl.com](https://clawtrl.com), the wallet skill is pre-installed automatically.
+If you deploy via [clawtrl.portalfoundation.ai](https://clawtrl.portalfoundation.ai), the wallet skill is pre-installed automatically.
 
 ## Configuration
 
@@ -450,7 +450,7 @@ Use these guides for planning and implementation details. Use the wallet tools h
 
 ## Links
 
-- [Clawtrl Skills](https://clawtrl.com/skills)
+- [Clawtrl Skills](https://clawtrl.portalfoundation.ai/skills)
 - [x402 Protocol](https://docs.x402.org)
 - [ERC-8128 Standard](https://erc8128.org)
 - [Base Chain](https://base.org)

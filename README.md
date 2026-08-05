@@ -1,6 +1,6 @@
 # Clawtrl Skills
 
-Official skills for [OpenClaw](https://openclaw.ai) and [Hermes](https://nousresearch.com/hermes) agents, built by [Clawtrl](https://clawtrl.com).
+Official skills for [OpenClaw](https://openclaw.ai) and [Hermes](https://nousresearch.com/hermes) agents, built by [Clawtrl](https://clawtrl.portalfoundation.ai).
 
 ## Skills
 
@@ -48,14 +48,14 @@ Full tool list (allowances, revokes, tx log, labels, gas estimation, private ZK 
 
 ## Pre-installed on Clawtrl
 
-If you deploy an agent via [clawtrl.com](https://clawtrl.com), the wallet skill is pre-installed and configured automatically on both OpenClaw and Hermes runtimes. Just fund the wallet and go.
+If you deploy an agent via [clawtrl.portalfoundation.ai](https://clawtrl.portalfoundation.ai), the wallet skill is pre-installed and configured automatically on both OpenClaw and Hermes runtimes. Just fund the wallet and go.
 
 **Hermes agents** also come preloaded with the [circle-agents](./circle-agents/) marketplace discovery skill.
 
 ## Links
 
-- [Clawtrl](https://clawtrl.com)
-- [Clawtrl Skills Marketplace](https://clawtrl.com/skills)
+- [Clawtrl](https://clawtrl.portalfoundation.ai)
+- [Clawtrl Skills Marketplace](https://clawtrl.portalfoundation.ai/skills)
 - [OpenClaw](https://openclaw.ai)
 - [Hermes Agent](https://nousresearch.com/hermes)
 - [Agent Skills Spec](https://skills.sh)

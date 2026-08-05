@@ -23,7 +23,7 @@
     "type": "git",
     "url": "https://github.com/PortalFnd/hermes-openclaw-skills"
   },
-  "homepage": "https://clawtrl.com/skills",
+  "homepage": "https://clawtrl.portalfoundation.ai/skills",
   "engines": {
     "node": ">=18"
   }
